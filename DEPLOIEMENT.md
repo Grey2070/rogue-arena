@@ -8,7 +8,7 @@
 ```bash
 npm install
 node server.js
-# Serveur disponible sur ws://localhost:8080
+# Serveur disponible sur wss://rogue-arena.up.railway.app
 ```
 
 ## Déploiement gratuit sur Railway
@@ -48,7 +48,7 @@ fly deploy
 
 En production, le serveur doit utiliser WSS (WebSocket Secure).
 Railway et Render gèrent le SSL automatiquement.
-L'URL devient : `wss://ton-domaine.up.railway.app`
+L'URL devient : `wss://rogue-arena.up.railway.app`
 
 ## Variables d'environnement
 
