@@ -8,7 +8,7 @@
 ```bash
 npm install
 node server.js
-# Serveur disponible sur ws://localhost:8080
+# Serveur disponible sur wss://rogue-arena.up.railway.app
 ```
 
 ## Déploiement gratuit sur Railway
