@@ -297,12 +297,24 @@ function handleGameAction(ws, msg) {
 
     case 'game_action': {
       // Broadcast to all other players
-      room.broadcast({
-        type: 'game_action',
-        pseudo: sender.pseudo,
-        slot: sender.slot,
-        action: msg.action,
-      }, ws);
+      // For end_turn: broadcast to ALL (including sender) so everyone advances together
+      // For move/skill: broadcast to all EXCEPT sender (sender already applied it)
+      const isEndTurn = msg.action?.type === 'end_turn';
+      if (isEndTurn) {
+        room.broadcastAll({
+          type: 'game_action',
+          pseudo: sender.pseudo,
+          slot: sender.slot,
+          action: msg.action,
+        });
+      } else {
+        room.broadcast({
+          type: 'game_action',
+          pseudo: sender.pseudo,
+          slot: sender.slot,
+          action: msg.action,
+        }, ws);
+      }
       // Reset turn timeout when player acts
       if (msg.action?.type === 'end_turn') {
         if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
