@@ -1225,9 +1225,14 @@ const BIOMES=[
   }
 ];
 
-function genMap(){
+function seededRand(seed){
+  let s=seed|0;
+  return function(){s=(Math.imul(1664525,s)+1013904223)|0;return(s>>>0)/4294967296;};
+}
+function genMap(seed){
   // Pick random biome
-  const biome=BIOMES[Math.floor(Math.random()*BIOMES.length)];
+    const rng=seed?seededRand(seed):()=>Math.random();
+  const biome=BIOMES[Math.floor(rng()*BIOMES.length)];
   const g=[];
   for(let y=0;y<GH;y++){g[y]=[];for(let x=0;x<GW;x++)g[y][x]=0;}
 
@@ -1237,7 +1242,7 @@ function genMap(){
   // River generation for wheat biome
   if(biome.hasRiver){
     // Rivière qui traverse diagonalement avec un pont
-    const riverY=3+Math.floor(Math.random()*2);
+    const riverY=3+Math.floor(rng()*2);
     let rx=0;
     while(rx<GW){
       if(!alwaysFree.has(rx+','+riverY)&&!alwaysFree.has(rx+','+(riverY+1))){
@@ -1259,9 +1264,9 @@ function genMap(){
     for(let x=0;x<GW;x++){
       if(alwaysFree.has(x+','+y)) continue;
       if(g[y][x]!==0) continue;
-      const r=Math.random();
+      const r=rng();
       if(r<0.32){
-        const pick=pool[Math.floor(Math.random()*pool.length)];
+        const pick=pool[Math.floor(rng()*pool.length)];
         if(pick!==0) g[y][x]=pick;
       }
     }
@@ -1275,7 +1280,7 @@ function genMap(){
       if(g2[y][x]!==0) continue;
       // Count neighbors with same obstacle type
       const neighbors=[g2[y-1][x],g2[y+1][x],g2[y][x-1],g2[y][x+1]].filter(v=>v>0&&v!==8&&v!==9);
-      if(neighbors.length>=2&&Math.random()<0.45){
+      if(neighbors.length>=2&&rng()<0.45){
         // Extend cluster with same type as majority neighbor
         const freq={};neighbors.forEach(v=>{freq[v]=(freq[v]||0)+1;});
         const dominant=Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0];
@@ -3638,6 +3643,8 @@ const G={
   },
 
   startPBTurn(){
+    // En mode online, le PB est piloté par le serveur — ne pas exécuter localement
+    if(G.mp&&G.mp._isOnline)return;
     const pb=this.pb;if(pb.step>=PB_SEQ.length){this.startGame();return;}
     const step=PB_SEQ[pb.step];clearInterval(pb.iv);pb.timer=15;document.getElementById('pb-timer').textContent=pb.timer;
     if(step.team==='enemy'){
@@ -3729,7 +3736,7 @@ const G={
   // ── GAME INIT ──────────────────────────────────────────────
   startGame(){
     clearInterval(this.pb.iv);const pb=this.pb;
-    const mapResult=genMap();this.grid=mapResult.grid;this.biome=mapResult.biome;this.biomeName=mapResult.biomeName;this.effects=[];this.units=[];this.round=1;
+    const _seed=G.mp&&G.mp._mapSeed?G.mp._mapSeed:null;const mapResult=genMap(_seed);this.grid=mapResult.grid;this.biome=mapResult.biome;this.biomeName=mapResult.biomeName;this.effects=[];this.units=[];this.round=1;
     this.selUnit=null;this.selSkill=null;this.highlights=[];ANIMS=[];this.turrets=[];this.bombs=[];
     this.decs=this.buildBorderDecs(mapResult.biome);
     // 🔵 Équipe bleue (player) = haut-gauche (0,0)
@@ -6408,6 +6415,12 @@ const G={
         this.renderUnitList('ally-list',this.units.filter(u=>u.team==='player'));
         this.renderUnitList('enemy-list',this.units.filter(u=>u.team==='enemy'));
       }
+      // En mode online : ne pas lancer l'IA pour les unités adverses
+      if(G.mp&&G.mp._isOnline&&u._remoteControlled){
+        this.log('⏳ En attente de '+u.name+'...','sys');
+        // Rien à faire — attendre game_action du serveur
+        return;
+      }
       const delay=this.mode==='2v2'?1200:500;
       setTimeout(()=>this.runAI(u),delay);
     }
@@ -7928,6 +7941,8 @@ const G={
   },
 
   startPBTurn2v2(){
+    // En mode online, le PB est piloté par le serveur
+    if(G.mp&&G.mp._isOnline)return;
     const pb=this.pb;
     if(pb.step>=PB_SEQ_2V2.length){this.startAppearancePhase();return;}
     clearInterval(pb.iv);
@@ -8001,7 +8016,7 @@ const G={
 
   startGame2v2(){
     clearInterval(this.pb.iv);const pb=this.pb;
-    const mapResult=genMap();this.grid=mapResult.grid;this.biome=mapResult.biome;this.biomeName=mapResult.biomeName;
+    const _seed2=G.mp&&G.mp._mapSeed?G.mp._mapSeed:null;const mapResult=genMap(_seed2);this.grid=mapResult.grid;this.biome=mapResult.biome;this.biomeName=mapResult.biomeName;
     this.effects=[];this.units=[];this.round=1;this.turrets=[];this.bombs=[];
     this.selUnit=null;this.selSkill=null;this.highlights=[];ANIMS=[];
     this.decs=this.buildBorderDecs(mapResult.biome);
@@ -8715,21 +8730,35 @@ G.mp = {
     switch(action.type) {
       case 'move': {
         const u = G.units.find(u => u.id === action.unitId);
-        if (u) G.moveUnit(u, action.tx, action.ty);
+        if (u) {
+          // Bypass the multiplayer patch — apply directly
+          const orig = G.moveUnit.__original || G.moveUnit;
+          orig.call(G, u, action.tx, action.ty);
+        }
         break;
       }
       case 'skill': {
         const u = G.units.find(u => u.id === action.unitId);
         const sk = u?.skills?.find(s => s.id === action.skillId);
-        if (u && sk) G.castSkill(u, sk, action.tx, action.ty);
+        if (u && sk) {
+          const orig = G.castSkill.__original || G.castSkill;
+          orig.call(G, u, sk, action.tx, action.ty);
+        }
         break;
       }
       case 'end_turn': {
-        G.endTurn();
-        break;
-      }
-      case 'pb_pick': {
-        G.pb.playerPick = action.heroId; // ou enemyPick selon slot
+        // Advance turn directly — don't go through endTurn() which checks playerCanEndTurn
+        const u2 = G.curUnit();
+        if (u2) {
+          G.tickFx(u2);
+          G.tickBombs(u2);
+          const living=G.units.filter(u=>u.alive).map(u=>u.id);
+          const nxtId=G.turnIdx+1<G.turnOrder.length?G.turnOrder[G.turnIdx+1]:null;
+          const nxtIsUnit=nxtId&&living.includes(nxtId);
+          if(!nxtIsUnit||(G.turnIdx+1>=G.turnOrder.length))G.tickGroundFx();
+        }
+        G.turnIdx++;
+        G.startNewTurn();
         break;
       }
     }
@@ -8858,15 +8887,12 @@ G.mp = {
     if (!pb) return;
 
     if (mode === '1v1') {
-      // Slot 0 = player team, Slot 1 = enemy team
-      // Each client sets playerPick = pick of their own slot
-      // Local 'player' unit = my hero, 'enemy' unit = opponent's hero
       pb.playerPick = msg.picks[0] || null;
       pb.enemyPick  = msg.picks[1] || null;
-      // If I'm slot 1, I AM the enemy — swap so MY hero is 'player'
       if (G.mp.mySlot === 1) {
         [pb.playerPick, pb.enemyPick] = [pb.enemyPick, pb.playerPick];
       }
+      G.mp._mapSeed = msg.mapSeed || null;
       G.startGame();
     } else {
       // 2v2: slots 0+2 = team player (blue, top-left)
@@ -9009,34 +9035,33 @@ G.mp = {
 (function patchForMultiplayer() {
   const _origEndTurn = G.endTurn.bind(G);
   G.endTurn = function() {
-    // En mode online, envoyer l'action avant de l'appliquer localement
     if (G.mp._isOnline && G.mp.ws?.readyState === WebSocket.OPEN) {
       const cu = G.curUnit();
-      if (cu && cu.team === 'player') {
+      // Only send if this is the LOCAL player's unit (not remote-controlled)
+      if (cu && cu.team === 'player' && !cu._remoteControlled) {
         G.mp.sendAction({ type: 'end_turn' });
       }
     }
     _origEndTurn();
-    if (G.mp._isOnline && G.mp.isHost) G.mp.syncState();
   };
 
   const _origMoveUnit = G.moveUnit.bind(G);
   G.moveUnit = function(unit, tx, ty, onDone) {
-    if (G.mp._isOnline && unit?.team === 'player') {
+    if (G.mp._isOnline && unit?.team === 'player' && !unit._remoteControlled) {
       G.mp.sendAction({ type: 'move', unitId: unit.id, tx, ty });
     }
     _origMoveUnit(unit, tx, ty, onDone);
-    if (G.mp._isOnline && G.mp.isHost) setTimeout(() => G.mp.syncState(), 300);
   };
+  G.moveUnit.__original = _origMoveUnit;
 
   const _origCastSkill = G.castSkill.bind(G);
   G.castSkill = function(caster, sk, tx, ty) {
-    if (G.mp._isOnline && caster?.team === 'player' && !caster.isServant && !caster.isClone) {
+    if (G.mp._isOnline && caster?.team === 'player' && !caster.isServant && !caster.isClone && !caster._remoteControlled) {
       G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty });
     }
     _origCastSkill(caster, sk, tx, ty);
-    if (G.mp._isOnline && G.mp.isHost) setTimeout(() => G.mp.syncState(), 300);
   };
+  G.castSkill.__original = _origCastSkill;
 })();
 
 // Pré-remplir le pseudo depuis localStorage + compter les chars
