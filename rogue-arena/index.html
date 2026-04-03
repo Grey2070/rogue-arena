@@ -3771,6 +3771,8 @@ const G={
     const at1=document.getElementById('ally-title');if(at1)at1.textContent='⚔ ALLIÉS';
     const et1=document.getElementById('enemy-title');if(et1)et1.textContent='💀 ENNEMIS';
     this.startMusic();
+    // Online: run post-fix after units are created
+    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
     this.startNewTurn();
   },
 
@@ -4519,7 +4521,7 @@ const G={
         '<div class="hptxt" id="uhp_'+u.id+'">'+u.hp+'/'+u.maxHp+' PV</div>'+
         '<div class="apmrow"><div class="apb" id="uap_'+u.id+'">PA '+u.ap+'</div><div class="mpb" id="ump_'+u.id+'">PM '+u.mp+'</div></div>'+
         '<div class="sticons">'+st+'</div>';
-      d.addEventListener('click',()=>{if(u.alive&&u.team==='player'){this.selUnit=u;this.selSkill=null;this.updateHighlights();this.renderSkills(u);}});
+      d.addEventListener('click',()=>{const _canSel=G.mp&&G.mp._isOnline?u._isLocalPlayer===true:u.team==='player';if(u.alive&&_canSel){this.selUnit=u;this.selSkill=null;this.updateHighlights();this.renderSkills(u);}});
       el.appendChild(d);
     });
   },
@@ -4561,7 +4563,7 @@ const G={
   renderMobileUI(){
     const cu=this.curUnit();if(!cu)return;
     const madEl=document.getElementById('mob-apm-display');if(madEl)madEl.innerHTML='<span style="color:#4a7ae8">PA:'+cu.ap+'</span> <span style="color:#4ae84a">PM:'+cu.mp+'</span>';
-    const mobEt=document.getElementById('mob-et-btn');if(mobEt)mobEt.disabled=cu.team!=='player';
+    const mobEt=document.getElementById('mob-et-btn');if(mobEt)mobEt.disabled=G.mp&&G.mp._isOnline?(cu._isLocalPlayer!==true):(cu.team!=='player');
 
     // Unit cards
     const mu=document.getElementById('mob-units');if(!mu)return;mu.innerHTML='';
@@ -4630,7 +4632,9 @@ const G={
   // ── SKILL CLICK ────────────────────────────────────────────
   onSkillClick(sk, unit){
     const cu=this.curUnit();
-    if(!cu||cu.team!=='player')return;
+    if(!cu)return;
+    const _skOk=G.mp&&G.mp._isOnline?cu._isLocalPlayer===true:cu.team==='player';
+    if(!_skOk)return;
     // L'unité passée en param OU selUnit doivent être le curUnit
     const u=unit||this.selUnit;
     if(!u||u.id!==cu.id){
@@ -4777,7 +4781,9 @@ const G={
 
   // ── TILE CLICK ─────────────────────────────────────────────
   handleTileClick(x,y){
-    const cu=this.curUnit();if(!cu||cu.team!=='player')return;
+    const cu=this.curUnit();if(!cu)return;
+    const _cuOk=G.mp&&G.mp._isOnline?cu._isLocalPlayer===true:cu.team==='player';
+    if(!_cuOk)return;
     if(this.selSkill){
       const hl=this.highlights.find(h=>h.x===x&&h.y===y);
       if(hl){
@@ -8064,6 +8070,7 @@ const G={
     const at=document.getElementById('ally-title');if(at)at.textContent='🔵 ÉQUIPE A';
     const et=document.getElementById('enemy-title');if(et)et.textContent='🔴 ÉQUIPE B';
     this.startMusic();
+    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
     this.startNewTurn();
   },
 
@@ -8937,57 +8944,75 @@ G.mp = {
     if (!pb) return;
 
     if (mode === '1v1') {
-      // Canonical: slot 0 → playerPick, slot 1 → enemyPick
-      // No swapping needed — each client controls their team
       pb.playerPick = msg.picks['0'] || msg.picks[0] || null;
       pb.enemyPick  = msg.picks['1'] || msg.picks[1] || null;
-      // Slot 0 = team 'player' (spawns top-left 0,0)
-      // Slot 1 = team 'enemy'  (spawns bottom-right 7,7)
+      // Slot 0 → team 'player' (top-left), Slot 1 → team 'enemy' (bottom-right)
       G.mp._myUnitTeam = (G.mp.mySlot === 0) ? 'player' : 'enemy';
+      G.mp._myUnitIdx  = 0;
+      // Assign control BEFORE startGame so isHumanTurn works on first turn
+      G.mp._assignUnitControl_preStart(mode);
       G.startGame();
     } else {
-      // 2v2: slot 0+2 = team player, slot 1+3 = team enemy
       pb.picksA = [msg.picks['0']||msg.picks[0], msg.picks['2']||msg.picks[2]].filter(Boolean);
       pb.picksB = [msg.picks['1']||msg.picks[1], msg.picks['3']||msg.picks[3]].filter(Boolean);
-      // My team: slot 0,2 → player; slot 1,3 → enemy
       G.mp._myUnitTeam = (G.mp.mySlot % 2 === 0) ? 'player' : 'enemy';
-      // My specific unit index within team
       G.mp._myUnitIdx  = (G.mp.mySlot === 0 || G.mp.mySlot === 1) ? 0 : 1;
+      G.mp._assignUnitControl_preStart(mode);
       G.startGame2v2();
-    }
-
-    // Assign unit control after game starts
-    if (G.mp._isOnline) {
-      setTimeout(() => G.mp._assignUnitControl(), 150);
     }
   },
 
+  // Called BEFORE startGame — stores config, patches mkUnit
+  _assignUnitControl_preStart(mode) {
+    // Patch G.mkUnit so each created unit immediately gets correct flags
+    const myTeam = G.mp._myUnitTeam || 'player';
+    const myIdx  = G.mp._myUnitIdx  ?? 0;
+    let teamCount = { player: 0, enemy: 0 };
+    const origMkUnit = G.mkUnit.bind(G);
+    G.mkUnit = function(hero, team, idx, sx, sy) {
+      const u = origMkUnit(hero, team, idx, sx, sy);
+      if (!G.mp._isOnline) return u;
+      const countForTeam = teamCount[team] || 0;
+      teamCount[team] = countForTeam + 1;
+      if (mode === '1v1') {
+        // Slot 0 controls player unit, slot 1 controls enemy unit
+        u._isLocalPlayer    = (team === myTeam);
+        u._remoteControlled = (team !== myTeam);
+      } else {
+        // 2v2: each client controls one unit of their team
+        u._isLocalPlayer    = (team === myTeam && countForTeam === myIdx);
+        u._remoteControlled = !u._isLocalPlayer;
+      }
+      return u;
+    };
+    G.mkUnit.__patched = true;
+    console.log('[MP] Pre-start control: myTeam='+myTeam+' myIdx='+myIdx);
+  },
+
+  // Called after game starts (optional post-fix)
   _assignUnitControl() {
     const myTeam = G.mp._myUnitTeam || 'player';
     const mode   = G.mp.mode || '1v1';
+    if (!G.units) return;
+    let teamCount = { player: 0, enemy: 0 };
     G.units.forEach(u => {
-      u._isLocalPlayer  = false;
-      u._remoteControlled = true;
+      const cnt = teamCount[u.team] || 0;
+      teamCount[u.team] = cnt + 1;
+      if (mode === '1v1') {
+        u._isLocalPlayer    = (u.team === myTeam);
+        u._remoteControlled = (u.team !== myTeam);
+      } else {
+        const myIdx = G.mp._myUnitIdx ?? 0;
+        u._isLocalPlayer    = (u.team === myTeam && cnt === myIdx);
+        u._remoteControlled = !u._isLocalPlayer;
+      }
     });
-    if (mode === '1v1') {
-      // Each client controls exactly 1 unit of their team
-      const myUnit = G.units.find(u => u.team === myTeam);
-      if (myUnit) {
-        myUnit._isLocalPlayer    = true;
-        myUnit._remoteControlled = false;
-      }
-    } else {
-      // 2v2: client controls the unit at their index within team
-      const idx = G.mp._myUnitIdx ?? 0;
-      const teamUnits = G.units.filter(u => u.team === myTeam);
-      const myUnit = teamUnits[idx];
-      if (myUnit) {
-        myUnit._isLocalPlayer    = true;
-        myUnit._remoteControlled = false;
-      }
-    }
     G.mp._onlineUnitId = G.units.find(u => u._isLocalPlayer)?.id;
-    console.log('[MP] Unité locale:', G.mp._onlineUnitId, '| équipe:', myTeam);
+    // Restore original mkUnit
+    if (G.mkUnit.__patched) {
+      G.mkUnit = G.mkUnit.__original_mk || G.mkUnit;
+    }
+    console.log('[MP] Unit control assigned:', G.mp._onlineUnitId, 'team:', myTeam);
   },
 
   _stopPBTimer() {
