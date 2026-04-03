@@ -295,15 +295,26 @@ function handleGameAction(ws, msg) {
       break;
     }
 
-    case 'game_action':    // Move, skill, end_turn
-      // Broadcast à tous les autres joueurs
+    case 'game_action': {
+      // Broadcast to all other players
       room.broadcast({
         type: 'game_action',
         pseudo: sender.pseudo,
         slot: sender.slot,
-        action: msg.action,  // {type:'move'|'skill'|'end_turn', ...}
+        action: msg.action,
       }, ws);
+      // Reset turn timeout when player acts
+      if (msg.action?.type === 'end_turn') {
+        if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+        // Start timer for next turn (45s)
+        room.turnTimer = setTimeout(() => {
+          if (room.state !== 'playing') return;
+          log(`Room ${room.id}: turn timeout — forcing end_turn`);
+          room.broadcastAll({ type: 'turn_timeout' });
+        }, 45000);
+      }
       break;
+    }
 
     case 'game_state_sync': // État complet (envoyé par le joueur host)
       room.gameState = msg.state;
