@@ -177,10 +177,12 @@ function startPBStep(room) {
     // picks[slot] = heroId
     const picks = room.pbPicks;  // {0: heroId, 1: heroId, ...}
     const bans  = room.pbBans;
+    const mapSeed = Math.floor(Math.random() * 2147483647);
     room.broadcastAll({
       type: 'game_start',
-      picks,     // by slot number
+      picks,
       bans,
+      mapSeed,
       roomId: room.id,
       mode: room.mode,
       players: room.players.map(p=>({ pseudo:p.pseudo, team:p.team, slot:p.slot, isBot:p.isBot }))
