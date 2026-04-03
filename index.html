@@ -3771,8 +3771,6 @@ const G={
     const at1=document.getElementById('ally-title');if(at1)at1.textContent='⚔ ALLIÉS';
     const et1=document.getElementById('enemy-title');if(et1)et1.textContent='💀 ENNEMIS';
     this.startMusic();
-    // Online: run post-fix after units are created
-    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
     this.startNewTurn();
   },
 
@@ -4521,7 +4519,7 @@ const G={
         '<div class="hptxt" id="uhp_'+u.id+'">'+u.hp+'/'+u.maxHp+' PV</div>'+
         '<div class="apmrow"><div class="apb" id="uap_'+u.id+'">PA '+u.ap+'</div><div class="mpb" id="ump_'+u.id+'">PM '+u.mp+'</div></div>'+
         '<div class="sticons">'+st+'</div>';
-      d.addEventListener('click',()=>{const _canSel=G.mp&&G.mp._isOnline?u._isLocalPlayer===true:u.team==='player';if(u.alive&&_canSel){this.selUnit=u;this.selSkill=null;this.updateHighlights();this.renderSkills(u);}});
+      d.addEventListener('click',()=>{const _canSel=G.mp&&G.mp._isOnline?(u.id===G.mp._myUnitId):u.team==='player';if(u.alive&&_canSel){this.selUnit=u;this.selSkill=null;this.updateHighlights();this.renderSkills(u);}});
       el.appendChild(d);
     });
   },
@@ -4563,7 +4561,7 @@ const G={
   renderMobileUI(){
     const cu=this.curUnit();if(!cu)return;
     const madEl=document.getElementById('mob-apm-display');if(madEl)madEl.innerHTML='<span style="color:#4a7ae8">PA:'+cu.ap+'</span> <span style="color:#4ae84a">PM:'+cu.mp+'</span>';
-    const mobEt=document.getElementById('mob-et-btn');if(mobEt)mobEt.disabled=G.mp&&G.mp._isOnline?(cu._isLocalPlayer!==true):(cu.team!=='player');
+    const mobEt=document.getElementById('mob-et-btn');if(mobEt)mobEt.disabled=G.mp&&G.mp._isOnline?(cu.id!==G.mp._myUnitId):(cu.team!=='player');
 
     // Unit cards
     const mu=document.getElementById('mob-units');if(!mu)return;mu.innerHTML='';
@@ -4633,7 +4631,7 @@ const G={
   onSkillClick(sk, unit){
     const cu=this.curUnit();
     if(!cu)return;
-    const _skOk=G.mp&&G.mp._isOnline?cu._isLocalPlayer===true:cu.team==='player';
+    const _skOk=G.mp&&G.mp._isOnline?(cu.id===G.mp._myUnitId):cu.team==='player';
     if(!_skOk)return;
     // L'unité passée en param OU selUnit doivent être le curUnit
     const u=unit||this.selUnit;
@@ -4782,7 +4780,7 @@ const G={
   // ── TILE CLICK ─────────────────────────────────────────────
   handleTileClick(x,y){
     const cu=this.curUnit();if(!cu)return;
-    const _cuOk=G.mp&&G.mp._isOnline?cu._isLocalPlayer===true:cu.team==='player';
+    const _cuOk=G.mp&&G.mp._isOnline?(cu.id===G.mp._myUnitId):cu.team==='player';
     if(!_cuOk)return;
     if(this.selSkill){
       const hl=this.highlights.find(h=>h.x===x&&h.y===y);
@@ -6410,8 +6408,9 @@ const G={
     this.log('─ Tour de '+u.name+(isFrozen?' ❄ GELÉ':isStunned?' 💫 ÉTOURDI':'')+' ─','sys');
     // En 2v2 : player_0 = joueur, player_1 = IA alliée
     const _isOnlineMode=G.mp&&G.mp._isOnline;
+    // Online: only the unit with matching id belongs to this client
     const isHumanTurn=_isOnlineMode
-      ? (u._isLocalPlayer===true&&!u.isServant&&!u.isClone&&!u._remoteControlled)
+      ? (u.id===G.mp._myUnitId&&!u.isServant&&!u.isClone)
       : (u.team==='player'&&(this.mode!=='2v2'||u.id==='player_0')&&!u.isServant&&!u.isClone);
     if(isHumanTurn){
       this.playerCanEndTurn=true;
@@ -6441,14 +6440,15 @@ const G={
         this.renderUnitList('ally-list',this.units.filter(u=>u.team==='player'));
         this.renderUnitList('enemy-list',this.units.filter(u=>u.team==='enemy'));
       }
-      // En mode online : ne pas lancer l'IA pour les unités adverses
-      if(G.mp&&G.mp._isOnline&&u._remoteControlled){
-        this.log('⏳ Tour de l\'adversaire...','sys');
-        // Rien à faire — attendre game_action du serveur
-        // Si le joueur est déconnecté (bot), l'IA locale prend le relais
+      // Online: ne pas lancer l'IA pour les unités adverses
+      if(G.mp&&G.mp._isOnline&&u.id!==G.mp._myUnitId){
+        this.log('⏳ Tour de '+u.name+'...','sys');
+        // Si ce joueur est déconnecté (bot), l'IA locale prend le relais
         if(u._botFallback){
           setTimeout(()=>this.runAI(u), 800);
+          return;
         }
+        // Sinon attendre game_action du serveur
         return;
       }
       const delay=this.mode==='2v2'?1200:500;
@@ -8070,7 +8070,6 @@ const G={
     const at=document.getElementById('ally-title');if(at)at.textContent='🔵 ÉQUIPE A';
     const et=document.getElementById('enemy-title');if(et)et.textContent='🔴 ÉQUIPE B';
     this.startMusic();
-    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
     this.startNewTurn();
   },
 
@@ -8537,12 +8536,14 @@ G.mp = {
         const p = G.mp.players.find(x => x.slot === msg.slot);
         if (p) { p.isBot = true; }
         // Find that player's unit and activate AI fallback
-        if (G.units) {
-          const disconnectedTeam = p?.team;
+        if (G.units && G.mp._gamePlayers) {
+          const disconnectedPlayer = G.mp._gamePlayers.find(x => x.slot === msg.slot);
+          // Determine unit id of disconnected player
+          const slotToId = {0:'player_0',1:'enemy_1',2:'player_1',3:'enemy_3'};
+          const disconnectedUnitId = slotToId[msg.slot];
           G.units.forEach(u => {
-            if (u.team === disconnectedTeam && u._remoteControlled) {
-              u._remoteControlled = false;
-              u._botFallback = true; // IA locale prend le relais
+            if (u.id === disconnectedUnitId) {
+              u._botFallback = true;
             }
           });
           // If it's currently that unit's turn, trigger AI now
@@ -8943,21 +8944,30 @@ G.mp = {
     const pb = G.pb;
     if (!pb) return;
 
+    // Compute which unit ID this client will control
+    // Unit IDs are: player_0, enemy_1 (1v1) or player_0, enemy_1, player_1, enemy_3 (2v2)
+    // Slot → unitId mapping:
+    //   slot 0 → 'player_0'  (team player, index 0)
+    //   slot 1 → 'enemy_1'   (team enemy,  index 1)
+    //   slot 2 → 'player_1'  (team player, index 1) [but mkUnit uses idx=2]
+    //   slot 3 → 'enemy_3'   (team enemy,  index 3) [but mkUnit uses idx=3]
+    const slotToUnitId = { 0:'player_0', 1:'enemy_1', 2:'player_1', 3:'enemy_3' };
+    // For 2v2 startGame2v2 uses mkUnit(h,'player',i,...) where i=0,1 for picksA
+    // and mkUnit(h,'enemy',i+2,...) where i=0,1 for picksB
+    // So: slot 0 → player_0, slot 1 → enemy_1 (wait — enemy idx starts at i+2=2)
+    // Actually: picksA[0]→player_0, picksA[1]→player_1
+    //           picksB[0]→enemy_2,  picksB[1]→enemy_3
+    const slotToUnitId2v2 = { 0:'player_0', 2:'player_1', 1:'enemy_2', 3:'enemy_3' };
+
     if (mode === '1v1') {
       pb.playerPick = msg.picks['0'] || msg.picks[0] || null;
       pb.enemyPick  = msg.picks['1'] || msg.picks[1] || null;
-      // Slot 0 → team 'player' (top-left), Slot 1 → team 'enemy' (bottom-right)
-      G.mp._myUnitTeam = (G.mp.mySlot === 0) ? 'player' : 'enemy';
-      G.mp._myUnitIdx  = 0;
-      // Assign control BEFORE startGame so isHumanTurn works on first turn
-      G.mp._assignUnitControl_preStart(mode);
+      G.mp._myUnitId = slotToUnitId[G.mp.mySlot] || 'player_0';
       G.startGame();
     } else {
       pb.picksA = [msg.picks['0']||msg.picks[0], msg.picks['2']||msg.picks[2]].filter(Boolean);
       pb.picksB = [msg.picks['1']||msg.picks[1], msg.picks['3']||msg.picks[3]].filter(Boolean);
-      G.mp._myUnitTeam = (G.mp.mySlot % 2 === 0) ? 'player' : 'enemy';
-      G.mp._myUnitIdx  = (G.mp.mySlot === 0 || G.mp.mySlot === 1) ? 0 : 1;
-      G.mp._assignUnitControl_preStart(mode);
+      G.mp._myUnitId = slotToUnitId2v2[G.mp.mySlot] || 'player_0';
       G.startGame2v2();
     }
   },
@@ -9139,7 +9149,7 @@ G.mp = {
     if (G.mp._isOnline && G.mp.ws?.readyState === WebSocket.OPEN) {
       const cu = G.curUnit();
       // Only send if this is the LOCAL player's unit (not remote-controlled)
-      if (cu && cu._isLocalPlayer && !cu._remoteControlled) {
+      if (cu && cu.id === G.mp._myUnitId) {
         G.mp.sendAction({ type: 'end_turn' });
       }
     }
@@ -9148,7 +9158,7 @@ G.mp = {
 
   const _origMoveUnit = G.moveUnit.bind(G);
   G.moveUnit = function(unit, tx, ty, onDone) {
-    if (G.mp._isOnline && unit?._isLocalPlayer && !unit._remoteControlled) {
+    if (G.mp._isOnline && unit?.id === G.mp._myUnitId) {
       G.mp.sendAction({ type: 'move', unitId: unit.id, tx, ty });
     }
     _origMoveUnit(unit, tx, ty, onDone);
@@ -9157,7 +9167,7 @@ G.mp = {
 
   const _origCastSkill = G.castSkill.bind(G);
   G.castSkill = function(caster, sk, tx, ty) {
-    if (G.mp._isOnline && caster?._isLocalPlayer && !caster.isServant && !caster.isClone && !caster._remoteControlled) {
+    if (G.mp._isOnline && caster?.id === G.mp._myUnitId && !caster.isServant && !caster.isClone) {
       G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty });
     }
     _origCastSkill(caster, sk, tx, ty);
