@@ -9148,9 +9148,12 @@ G.mp = {
   G.endTurn = function() {
     if (G.mp._isOnline && G.mp.ws?.readyState === WebSocket.OPEN) {
       const cu = G.curUnit();
-      // Only send if this is the LOCAL player's unit (not remote-controlled)
       if (cu && cu.id === G.mp._myUnitId) {
+        // Online: send to server, DO NOT advance locally
+        // The server will broadcast end_turn back to ALL players
+        // and everyone advances via _applyRemoteAction
         G.mp.sendAction({ type: 'end_turn' });
+        return; // ← DO NOT call _origEndTurn here
       }
     }
     _origEndTurn();
