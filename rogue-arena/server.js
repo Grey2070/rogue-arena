@@ -33,16 +33,25 @@ function loadPseudoData() {
 }
 
 function savePseudoData() {
+  // Only save pseudos seen in the last 24h to avoid stale blocks
   try {
-    fs.writeFileSync(PSEUDO_FILE, JSON.stringify(Object.fromEntries(pseudoRegistry)));
+    const cutoff = Date.now() - 24*3600*1000;
+    const toSave = {};
+    pseudoRegistry.forEach((v,k) => { if(v.lastSeen > cutoff) toSave[k] = v; });
+    fs.writeFileSync(PSEUDO_FILE, JSON.stringify(toSave));
   } catch(e) {}
 }
 
-function canUsePseudo(pseudo, ip) {
+function canUsePseudo(pseudo, ip, currentPseudo) {
   const key = pseudo.toLowerCase();
   const entry = pseudoRegistry.get(key);
-  if (!entry) return true; // never used
-  return entry.ip === ip;   // same IP can reuse their pseudo
+  if (!entry) return true;
+  if (entry.ip === ip) return true; // same IP = same player
+  // Allow if currently connected with this pseudo (reconnect case)
+  for (const [, pd] of players.entries()) {
+    if (pd.pseudo?.toLowerCase() === key && pd._ip === ip) return true;
+  }
+  return false;
 }
 
 function registerPseudo(pseudo, ip) {
@@ -545,6 +554,16 @@ function onDisconnect(ws) {
     }
   }
 
+  // Free the pseudo registry entry on disconnect (allow reconnect with same pseudo)
+  // But only remove if this is the registered IP
+  if (pd.pseudo) {
+    const key = pd.pseudo.toLowerCase();
+    const entry = pseudoRegistry.get(key);
+    if (entry && entry.ip === pd._ip) {
+      // Update lastSeen but keep the entry (so same IP can reclaim it)
+      entry.lastSeen = Date.now();
+    }
+  }
   players.delete(ws);
   log(`Déconnexion: ${pd.pseudo}`);
 }

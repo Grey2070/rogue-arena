@@ -1287,9 +1287,9 @@ function t2s(tx,ty){return{x:OX+(tx-ty)*TW/2,y:OY+(tx+ty)*TH/2};}
 function s2t(sx,sy){const rx=sx-OX,ry=sy-OY;return{x:Math.round((rx/(TW/2)+ry/(TH/2))/2),y:Math.round((ry/(TH/2)-rx/(TW/2))/2)};}
 function inGrid(x,y){return x>=0&&x<GW&&y>=0&&y<GH;}
 function dist(ax,ay,bx,by){return Math.abs(ax-bx)+Math.abs(ay-by);}
-function hasLOS(grid,x1,y1,x2,y2){
+function hasLOS(grid,x1,y1,x2,y2,blockingUnits){
+  // blockingUnits: optional array of {x,y} positions that block LOS
   let dx=Math.abs(x2-x1),dy=Math.abs(y2-y1),sx=x1<x2?1:-1,sy=y1<y2?1:-1,err=dx-dy,cx=x1,cy=y1;
-  // Types qui BLOQUENT la LDV
   const LOS_BLOCKERS=new Set([1,2,3,4,6,10,11,12,13]);
   while(cx!==x2||cy!==y2){
     let e2=2*err;
@@ -1298,6 +1298,12 @@ function hasLOS(grid,x1,y1,x2,y2){
     if(cx===x2&&cy===y2)break;
     const g=grid[cy]?.[cx];
     if(g&&LOS_BLOCKERS.has(g))return false;
+    // Check if a unit stands here and blocks LOS (not source, not target)
+    if(blockingUnits){
+      for(const bu of blockingUnits){
+        if(bu.x===cx&&bu.y===cy)return false;
+      }
+    }
   }
   return true;
 }
@@ -4112,6 +4118,10 @@ const G={
     const tip=document.getElementById('tip');
     if(!inGrid(t.x,t.y)||isMobile()){tip.classList.remove('vis');return;}
     const u=this.getUnitAt(t.x,t.y);
+    // Don't reveal camouflaged enemies via tooltip
+    if(u&&u.team!=='player'&&u.statusEffects&&u.statusEffects.some(s=>s.type==='camouflage')){
+      tip.classList.remove('vis');return;
+    }
     // Vérifier aussi les tourelles
     const turr=this.turrets&&this.turrets.find(tr=>tr.alive&&tr.x===t.x&&tr.y===t.y);
     if(u){
@@ -4855,7 +4865,8 @@ const G={
       this.units.forEach(t=>{
         if(!t.alive||t.id===u.id)return;
         const d=dist(u.x,u.y,t.x,t.y);
-        if(d<=sk.range&&(sk.ignoresLOS||hasLOS(this.grid,u.x,u.y,t.x,t.y))){
+        const _blk=this.units.filter(b=>b.alive&&b.x!==u.x&&b.y!==u.y&&b.x!==t.x&&b.y!==t.y);
+        if(d<=sk.range&&(sk.ignoresLOS||hasLOS(this.grid,u.x,u.y,t.x,t.y,_blk))){
           this.highlights.push({x:t.x,y:t.y,type:'attack'});
         }
       });
@@ -7468,6 +7479,16 @@ const G={
     if(!_nxtIsUnit||(this.turnIdx+1>=this.turnOrder.length))this.tickGroundFx();
     setTimeout(()=>{
       if(this.checkWin())return;
+      // Online: broadcast end_turn for servant/clone/turret owned by me
+      if(G.mp&&G.mp._isOnline){
+        const isMyServant=(unit.isServant||unit.isClone)&&
+          (unit.servantOwner===G.mp._myUnitId||unit.cloneOwner===G.mp._myUnitId);
+        const isMyTurret=unit._isTurret&&unit.owner===G.mp._myUnitId;
+        if(isMyServant||isMyTurret){
+          G.mp.sendAction({type:'end_turn'});
+          return; // server will broadcast end_turn back to advance both clients
+        }
+      }
       this.turnIdx++;
       this.startNewTurn();
     },300);
@@ -9390,8 +9411,14 @@ G.mp = {
 
   const _origMoveUnit = G.moveUnit.bind(G);
   G.moveUnit = function(unit, tx, ty, onDone) {
-    if (G.mp._isOnline && unit?.id === G.mp._myUnitId) {
-      G.mp.sendAction({ type: 'move', unitId: unit.id, tx, ty });
+    if (G.mp._isOnline) {
+      const isMyUnit = unit?.id === G.mp._myUnitId;
+      const isMyServant = (unit?.isServant||unit?.isClone) &&
+        (unit?.servantOwner===G.mp._myUnitId||unit?.cloneOwner===G.mp._myUnitId);
+      const isMyTurret = unit?._isTurret && unit?.owner===G.mp._myUnitId;
+      if (isMyUnit || isMyServant || isMyTurret) {
+        G.mp.sendAction({ type: 'move', unitId: unit.id, tx, ty });
+      }
     }
     _origMoveUnit(unit, tx, ty, onDone);
   };
@@ -9399,8 +9426,14 @@ G.mp = {
 
   const _origCastSkill = G.castSkill.bind(G);
   G.castSkill = function(caster, sk, tx, ty) {
-    if (G.mp._isOnline && caster?.id === G.mp._myUnitId && !caster.isServant && !caster.isClone) {
-      G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty });
+    if (G.mp._isOnline) {
+      const isMyUnit = caster?.id === G.mp._myUnitId;
+      const isMyServant = (caster?.isServant||caster?.isClone) &&
+        (caster?.servantOwner===G.mp._myUnitId||caster?.cloneOwner===G.mp._myUnitId);
+      const isMyTurret = caster?._isTurret && caster?.owner===G.mp._myUnitId;
+      if (isMyUnit || isMyServant || isMyTurret) {
+        G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty });
+      }
     }
     _origCastSkill(caster, sk, tx, ty);
   };
