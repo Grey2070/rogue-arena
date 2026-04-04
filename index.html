@@ -40,7 +40,7 @@ canvas{image-rendering:pixelated;display:block}
   margin:0 auto;/* Always centered regardless of side panels */}
 /* Side panels: fixed to screen edges, half-height, collapsible */
 .title-side-panel{position:absolute;top:50%;transform:translateY(-50%);
-  width:310px;max-height:72vh;display:flex;flex-direction:column;
+  width:340px;max-height:75vh;display:flex;flex-direction:column;
   background:rgba(4,12,26,.92);border:1px solid #1a3050;border-radius:8px;
   overflow:hidden;transition:width .3s,opacity .3s;z-index:10}
 #leaderboard-panel{left:10px}
@@ -49,7 +49,7 @@ canvas{image-rendering:pixelated;display:block}
 .title-side-panel.collapsed .side-panel-body{display:none}
 .side-panel-toggle{position:absolute;top:8px;right:8px;background:none;border:none;
   color:#40c8e8;cursor:pointer;font-size:.8em;padding:0;line-height:1;z-index:2}
-.side-panel-title{padding:10px 34px 10px 12px;font-size:.74em;letter-spacing:2px;
+.side-panel-title{padding:12px 36px 12px 14px;font-size:.84em;letter-spacing:2px;
   color:#40c8e8;border-bottom:1px solid #1a3050;flex-shrink:0;white-space:nowrap;
   cursor:pointer;user-select:none}
 .title-side-panel.collapsed .side-panel-title{writing-mode:vertical-lr;
@@ -61,14 +61,14 @@ canvas{image-rendering:pixelated;display:block}
   border-bottom:2px solid transparent;transition:all .2s}
 .lb-tab.active{color:#40c8e8;border-bottom-color:#40c8e8}
 .lb-list{overflow-y:auto;max-height:calc(70vh - 80px);padding:2px 0}
-.lb-entry{display:flex;align-items:center;gap:8px;padding:6px 12px;
-  font-size:.76em;border-bottom:1px solid rgba(255,255,255,.05)}
+.lb-entry{display:flex;align-items:center;gap:10px;padding:8px 14px;
+  font-size:.88em;border-bottom:1px solid rgba(255,255,255,.06)}
 .lb-entry.me{background:rgba(64,128,255,.12);color:#80b0ff}
-.lb-rank{color:#607080;min-width:22px;text-align:right;font-size:.95em}
+.lb-rank{color:#607080;min-width:26px;text-align:right;font-size:1em}
 .lb-pseudo{flex:1;color:#c0d8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lb-elo{color:#c8a840;font-weight:bold;min-width:36px;text-align:right}
-#global-chat-msgs .cm{font-size:.78em;color:#a0b8c8;word-break:break-word;
-  padding:3px 0;line-height:1.5}
+.lb-elo{color:#c8a840;font-weight:bold;min-width:40px;text-align:right}
+#global-chat-msgs .cm{font-size:.92em;color:#a0b8c8;word-break:break-word;
+  padding:4px 0;line-height:1.55}
 #global-chat-msgs .cm b{color:#40c8e8}
 @media(max-width:768px){
   /* On mobile: panels are hidden by default, accessible via small edge tabs */
@@ -8512,7 +8512,7 @@ G.mp = {
       const modeEl2 = document.getElementById('lobby-queue-mode');
       if (modeEl2) modeEl2.textContent = `${this.mode.toUpperCase()} · En attente de joueurs...`;
       this._send({ type: 'join_queue', pseudo: this.pseudo, sessionId: this.sessionId,
-        mode: this.mode });
+        mode: this.mode, preferredTeam: this._pendingTeam||'player' });
     });
   },
 
@@ -8873,61 +8873,85 @@ G.mp = {
   },
 
   _show2v2SlotPicker(matchData, panel) {
-    // Simple 4-slot picker embedded in the match panel
-    // Slots 0,2 = 🔵 Team A | Slots 1,3 = 🔴 Team B
     G.mp._teamSelectData = matchData;
     G.mp._selectedSlot = null;
 
-    const SLOT_DEF = [
-      {slot:0, label:'A1', team:'player', color:'#4080ff', border:'#2a5aaa'},
-      {slot:2, label:'A2', team:'player', color:'#4080ff', border:'#2a5aaa'},
-      {slot:1, label:'B1', team:'enemy',  color:'#e04040', border:'#aa2a2a'},
-      {slot:3, label:'B2', team:'enemy',  color:'#e04040', border:'#aa2a2a'},
-    ];
+    // Remove any countdown
+    const countdown = panel?.querySelector('#match-countdown')?.closest('div');
+    if (countdown) countdown.remove();
+    if (panel) {
+      const title = panel.querySelector('[style*="1.1em"]');
+      if (title) title.textContent = '⚔ CHOISISSEZ VOTRE EMPLACEMENT';
+    }
 
-    const renderSlots = () => {
-      const grid = document.getElementById('slot-picker-grid');
-      if (!grid) return;
-      grid.innerHTML = '';
-      SLOT_DEF.forEach(sd => {
-        const occ = matchData.players.find(p => p.slot === sd.slot);
-        const isMine = occ && !occ.isBot && occ.pseudo === G.mp.pseudo;
-        const taken  = occ && !occ.isBot && occ.pseudo !== G.mp.pseudo;
-        const btn = document.createElement('button');
-        btn.style.cssText = `flex:1;padding:10px 6px;border:2px solid ${sd.border};
-          border-radius:6px;background:${isMine?sd.color+'33':'rgba(0,0,0,.3)'};
-          color:${isMine?sd.color:taken?'#607080':sd.color};
-          font-family:inherit;font-size:.82em;cursor:${taken?'not-allowed':'pointer'};
-          display:flex;flex-direction:column;align-items:center;gap:4px;
-          transition:all .2s;min-width:70px`;
-        btn.innerHTML = `<b>${sd.label}</b><span style="font-size:.72em;opacity:.7">
-          ${occ&&!occ.isBot?occ.pseudo:(occ?'🤖 IA':'Libre')}</span>`;
-        if (!taken) btn.onclick = () => G.mp._selectSlot(sd.slot);
-        grid.appendChild(btn);
+    // Slots: 0,2 = Equipe Bleue | 1,3 = Equipe Rouge
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div style="font-size:.72em;color:#607080;margin-bottom:10px;text-align:center">
+        Cliquez sur un emplacement libre pour le rejoindre
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:280px;margin:0 auto">
+        <div style="border:2px solid #4080ff;border-radius:8px;padding:4px;background:rgba(64,128,255,.08)">
+          <div style="color:#4080ff;font-size:.7em;text-align:center;padding:3px;border-bottom:1px solid #1a3a6a;margin-bottom:6px">🔵 ÉQUIPE A</div>
+          <button id="slot-btn-0" onclick="G.mp._selectSlot(0)"
+            style="width:100%;padding:8px 4px;border:1px solid #2a5aaa;border-radius:5px;
+            background:rgba(0,0,0,.3);color:#6090d0;font-family:inherit;font-size:.78em;
+            cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:5px">
+            <b>A1 — Tour 1</b><span id="slot-occ-0" style="font-size:.85em;color:#405060">Libre</span>
+          </button>
+          <button id="slot-btn-2" onclick="G.mp._selectSlot(2)"
+            style="width:100%;padding:8px 4px;border:1px solid #2a5aaa;border-radius:5px;
+            background:rgba(0,0,0,.3);color:#6090d0;font-family:inherit;font-size:.78em;
+            cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <b>A2 — Tour 3</b><span id="slot-occ-2" style="font-size:.85em;color:#405060">Libre</span>
+          </button>
+        </div>
+        <div style="border:2px solid #e04040;border-radius:8px;padding:4px;background:rgba(224,64,64,.08)">
+          <div style="color:#e04040;font-size:.7em;text-align:center;padding:3px;border-bottom:1px solid #6a1a1a;margin-bottom:6px">🔴 ÉQUIPE B</div>
+          <button id="slot-btn-1" onclick="G.mp._selectSlot(1)"
+            style="width:100%;padding:8px 4px;border:1px solid #aa2a2a;border-radius:5px;
+            background:rgba(0,0,0,.3);color:#d06060;font-family:inherit;font-size:.78em;
+            cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:5px">
+            <b>B1 — Tour 2</b><span id="slot-occ-1" style="font-size:.85em;color:#405060">Libre</span>
+          </button>
+          <button id="slot-btn-3" onclick="G.mp._selectSlot(3)"
+            style="width:100%;padding:8px 4px;border:1px solid #aa2a2a;border-radius:5px;
+            background:rgba(0,0,0,.3);color:#d06060;font-family:inherit;font-size:.78em;
+            cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <b>B2 — Tour 4</b><span id="slot-occ-3" style="font-size:.85em;color:#405060">Libre</span>
+          </button>
+        </div>
+      </div>
+      <div id="slot-status" style="color:#40c8e8;font-size:.72em;min-height:18px;margin-top:8px;text-align:center"></div>
+      <div style="color:#405060;font-size:.65em;margin-top:4px;text-align:center">
+        Lancement auto dans <span id="slot-cd-num">15</span>s
+      </div>`;
+    if (panel) panel.appendChild(wrap);
+
+    // Refresh occupied slots from matchData
+    const refreshSlots = () => {
+      [0,1,2,3].forEach(s => {
+        const occ = matchData.players.find(p=>p.slot===s);
+        const el = document.getElementById('slot-occ-'+s);
+        const btn = document.getElementById('slot-btn-'+s);
+        if (!el || !btn) return;
+        const isMine = occ && !occ.isBot && occ.pseudo===G.mp.pseudo;
+        const isTaken = occ && !occ.isBot && occ.pseudo!==G.mp.pseudo;
+        el.textContent = occ && !occ.isBot ? occ.pseudo : (occ ? '🤖 IA' : 'Libre');
+        const isBlue = s===0||s===2;
+        const selColor = isBlue ? '#80b0ff' : '#ff8080';
+        btn.style.background = isMine ? (isBlue?'rgba(64,128,255,.25)':'rgba(224,64,64,.25)') : 'rgba(0,0,0,.3)';
+        btn.style.color = isMine ? selColor : (isTaken ? '#405060' : (isBlue?'#6090d0':'#d06060'));
+        btn.style.cursor = isTaken ? 'not-allowed' : 'pointer';
+        btn.disabled = isTaken;
+        el.style.color = isMine ? selColor : (isTaken?'#405060':'#405060');
       });
     };
+    refreshSlots();
+    G.mp._slotRefresh = refreshSlots;
 
-    // Inject slot picker into panel
-    if (panel) {
-      const title = panel.querySelector('div');
-      if (title) title.textContent = '⚔ MATCH TROUVÉ — CHOISISSEZ VOTRE EMPLACEMENT';
-      const countdown = panel.querySelector('[id="match-countdown"]')?.parentElement;
-      if (countdown) countdown.remove();
-      const gridWrap = document.createElement('div');
-      gridWrap.innerHTML = `
-        <div style="font-size:.7em;color:#607080;margin-bottom:6px">
-          🔵 Équipe A (slots 1&2)&nbsp;&nbsp;&nbsp;🔴 Équipe B (slots 3&4)
-        </div>
-        <div id="slot-picker-grid" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"></div>
-        <div id="slot-cd" style="color:#405060;font-size:.68em;margin-top:6px">
-          Lancement auto dans <span id="slot-cd-num">12</span>s</div>`;
-      panel.appendChild(gridWrap);
-      renderSlots();
-    }
-    G.mp._slotRender = renderSlots;
-
-    // Auto-launch after 12s
-    let t = 12;
+    // Auto-assign after 15s
+    let t = 15;
     G.mp._slotTimer = setInterval(() => {
       t--;
       const el = document.getElementById('slot-cd-num');
@@ -8935,7 +8959,6 @@ G.mp = {
       if (t <= 0) {
         clearInterval(G.mp._slotTimer);
         if (G.mp._selectedSlot === null) {
-          // Auto-assign to first free slot
           const taken = matchData.players.filter(p=>!p.isBot).map(p=>p.slot);
           const free = [0,2,1,3].find(s => !taken.includes(s)) ?? 0;
           G.mp._selectSlot(free);
@@ -8946,40 +8969,51 @@ G.mp = {
 
   _selectSlot(chosenSlot) {
     const matchData = G.mp._teamSelectData;
-    if (!matchData || G.mp._selectedSlot !== null) return;
+    if (!matchData) return;
 
-    const SLOT_DEF = [
-      {slot:0,team:'player'},{slot:2,team:'player'},
-      {slot:1,team:'enemy'}, {slot:3,team:'enemy'},
-    ];
-    const slotDef = SLOT_DEF.find(s=>s.slot===chosenSlot);
-    if (!slotDef) return;
+    const SLOT_TEAM = {0:'player',2:'player',1:'enemy',3:'enemy'};
+    const team = SLOT_TEAM[chosenSlot];
+    if (!team) return;
 
     // Check if taken by someone else
     const occ = matchData.players.find(p=>p.slot===chosenSlot&&!p.isBot&&p.pseudo!==G.mp.pseudo);
-    if (occ) return;
+    if (occ) { return; }
 
-    // Claim the slot
+    // If already on this slot, deselect
+    if (G.mp._selectedSlot === chosenSlot) {
+      G.mp._selectedSlot = null;
+      const me = matchData.players.find(p=>!p.isBot&&p.pseudo===G.mp.pseudo);
+      if (me) { me.slot = -1; me.team = null; }
+      if (G.mp._slotRefresh) G.mp._slotRefresh();
+      const st = document.getElementById('slot-status');
+      if (st) st.textContent = '';
+      return;
+    }
+
     G.mp._selectedSlot = chosenSlot;
     G.mp.mySlot = chosenSlot;
     clearInterval(G.mp._slotTimer);
 
     // Update matchData
     const me = matchData.players.find(p=>!p.isBot&&p.pseudo===G.mp.pseudo);
-    if (me) { me.slot = chosenSlot; me.team = slotDef.team; }
+    if (me) { me.slot = chosenSlot; me.team = team; }
+    else matchData.players.push({pseudo:G.mp.pseudo, slot:chosenSlot, team, isBot:false});
 
     // Tell server
     G.mp._send({type:'slot_choice', slot:chosenSlot});
 
     // Refresh UI
-    if (G.mp._slotRender) G.mp._slotRender();
+    if (G.mp._slotRefresh) G.mp._slotRefresh();
+    const st = document.getElementById('slot-status');
+    const lbl = chosenSlot===0?'A1':chosenSlot===2?'A2':chosenSlot===1?'B1':'B2';
+    if (st) st.textContent = `✅ Emplacement ${lbl} sélectionné — lancement dans 2s…`;
 
-    // Launch after 1.5s
+    // Launch after 2s
     setTimeout(() => {
       const panel = document.getElementById('match-found-panel');
       if (panel) panel.remove();
       G.mp._launchOnlineGame(matchData);
-    }, 1500);
+    }, 2000);
   },
 
   _selectTeam(team) {
@@ -9045,6 +9079,8 @@ G.mp = {
         if (u && sk) {
           const orig = G.castSkill.__original || G.castSkill;
           orig.call(G, u, sk, action.tx, action.ty);
+          // After skill applied, rebuild turnOrder (may have added servants/turrets)
+          if (G.units) G.buildTurnOrder?.();
         }
         break;
       }
@@ -9436,6 +9472,8 @@ G.mp = {
       }
     }
     _origCastSkill(caster, sk, tx, ty);
+    // Rebuild turnOrder if new entities were created (servants, turrets, clones)
+    if (G.mp._isOnline && G.units) setTimeout(() => G.buildTurnOrder?.(), 50);
   };
   G.castSkill.__original = _origCastSkill;
 })();
@@ -9498,14 +9536,18 @@ G.mp.onChatPseudoInput = function(input) {
   input.value = clean;
   const ok = document.getElementById('chat-pseudo-ok');
   if (ok) { ok.textContent = ''; ok.style.color='#40c870'; }
+  if (this._pseudoCheckTimer) clearTimeout(this._pseudoCheckTimer);
   if (clean.length >= 2) {
-    this.pseudo = clean;
-    localStorage.setItem('ra_pseudo', clean);
-    const li = document.getElementById('lobby-pseudo-input');
-    if (li) li.value = clean;
-    // Check pseudo availability on server
-    if (!this.connected) this._connectBackground();
-    setTimeout(() => this._send({type:'set_pseudo', pseudo:clean, sessionId:this.sessionId}), 300);
+    this._pseudoCheckTimer = setTimeout(() => {
+      this.pseudo = clean;
+      localStorage.setItem('ra_pseudo', clean);
+      const li = document.getElementById('lobby-pseudo-input');
+      if (li) li.value = clean;
+      if (!this.connected) this._connectBackground();
+      setTimeout(() => this._send({
+        type:'set_pseudo', pseudo:clean, sessionId:this.sessionId
+      }), this.connected ? 0 : 500);
+    }, 400); // debounce
   }
 };
 
