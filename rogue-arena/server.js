@@ -434,14 +434,19 @@ function handleGameAction(ws, msg) {
     case 'chat': break; // chat in-game désactivé
 
     case 'game_over':
+      // Deduplicate: only update ELO once per game
+      if (room._eloUpdated) { break; }
+      room._eloUpdated = true;
       room.state = 'finished';
       room.broadcastAll({ type: 'game_over', winner: msg.winner });
-      log(`Room ${room.id}: partie terminée (${msg.winner})`);
-      // Update ELO for all players
-      room.players.filter(p=>!p.isBot&&p.pseudo).forEach(p => {
-        const won = msg.winner === p.team;
+      log(`Room ${room.id}: game over → winner: ${msg.winner}`);
+      // Update ELO for all human players exactly once
+      room.players.filter(p => !p.isBot && p.pseudo).forEach(p => {
+        const won = p.team === msg.winner;
         const cur = getElo(room.mode, p.pseudo);
-        setElo(room.mode, p.pseudo, cur + (won ? 25 : -20));
+        const delta = won ? 25 : -20;
+        log(`ELO ${room.mode}: ${p.pseudo} ${cur} → ${cur+delta} (${won?'+25':'-20'})`);
+        setElo(room.mode, p.pseudo, cur + delta);
       });
       setTimeout(() => rooms.delete(room.id), 30000);
       break;
