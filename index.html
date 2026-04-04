@@ -32,8 +32,36 @@ canvas{image-rendering:pixelated;display:block}
 .screen.active{display:flex}
 
 /* ═══ TITLE ════════════════════════════════════════════════ */
-#sc-title{flex-direction:column;align-items:center;justify-content:center;
-  background:radial-gradient(ellipse at 50% 35%,#160a2a 0%,#080a0f 65%)}
+#sc-title{flex-direction:row;align-items:stretch;justify-content:center;
+  background:radial-gradient(ellipse at 50% 35%,#160a2a 0%,#080a0f 65%);
+  padding:0;gap:0;overflow:hidden}
+.title-center{flex:0 0 320px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:20px 10px;overflow-y:auto}
+.title-side-panel{flex:1;max-width:260px;display:flex;flex-direction:column;
+  background:rgba(5,15,30,.7);border-right:1px solid #1a3050;overflow:hidden}
+#chat-panel{border-right:none;border-left:1px solid #1a3050}
+.side-panel-title{padding:10px 12px;font-size:.72em;letter-spacing:2px;
+  color:#40c8e8;border-bottom:1px solid #1a3050;flex-shrink:0}
+.lb-tabs{display:flex;border-bottom:1px solid #1a3050;flex-shrink:0}
+.lb-tab{flex:1;background:none;border:none;color:#607080;padding:7px;
+  font-family:inherit;font-size:.72em;cursor:pointer;letter-spacing:1px;
+  border-bottom:2px solid transparent;transition:all .2s}
+.lb-tab.active{color:#40c8e8;border-bottom-color:#40c8e8}
+.lb-list{flex:1;overflow-y:auto;padding:4px 0}
+.lb-entry{display:flex;align-items:center;gap:8px;padding:5px 12px;
+  font-size:.7em;border-bottom:1px solid rgba(255,255,255,.04)}
+.lb-entry.me{background:rgba(64,128,255,.1);color:#80b0ff}
+.lb-rank{color:#607080;min-width:22px;text-align:right}
+.lb-pseudo{flex:1;color:#c0d8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-elo{color:#c8a840;font-weight:bold;min-width:36px;text-align:right}
+#global-chat-msgs .cm{font-size:.72em;color:#a0b8c8;word-break:break-word}
+#global-chat-msgs .cm b{color:#40c8e8}
+@media(max-width:700px){
+  #sc-title{flex-direction:column}
+  .title-side-panel{max-width:100%;height:180px;flex:0 0 180px}
+  #leaderboard-panel{order:-1}
+  .title-center{flex:1}
+}
 #sc-title::before{content:'';position:absolute;inset:0;
   background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,255,255,.012) 3px,rgba(255,255,255,.012) 4px);
   pointer-events:none}
@@ -494,22 +522,60 @@ canvas{image-rendering:pixelated;display:block}
 
 <!-- ═══ TITLE ══════════════════════════════════════════════ -->
 <div class="screen active" id="sc-title">
-  <div class="logo">ROGUE ARENA</div>
-  <div class="logo-sub">TACTICAL COMBAT</div>
-  <button class="mbtn" onclick="G.startPB()">⚔ 1v1 vs IA</button>
-  <button class="mbtn mbtn-2v2" onclick="G.start2v2PB()">👥 2v2 vs IA</button>
-  <button class="mbtn" onclick="G.showScreen('lobby')" style="border-color:#40c8e8;color:#40c8e8">🌐 MULTIJOUEUR EN LIGNE</button>
-  <button class="mbtn" onclick="document.getElementById('howto').classList.add('vis')">? AIDE</button>
-  <button class="mbtn" onclick="document.getElementById('changelog').classList.add('vis')" style="border-color:#c8a840;color:#c8a840">📋 CHANGELOG</button>
-  <button class="mbtn" style="border-color:#c0c0d0;color:#c0c0d0" onclick="G.openShop()">🏪 BOUTIQUE</button>
-  <div class="elo-disp">ELO Solo : <span id="elo-val">1200</span></div>
-  <div class="elo-disp" style="color:#c0c0d0;display:flex;align-items:center;gap:6px;justify-content:center">
-    <canvas id="ecu-title-icon" width="18" height="18"></canvas>
-    Écus : <span id="ecu-val">0</span>
+  <!-- ── Classement gauche ──────────────────────── -->
+  <div class="title-side-panel" id="leaderboard-panel">
+    <div class="side-panel-title">🏆 CLASSEMENT EN LIGNE</div>
+    <div class="lb-tabs">
+      <button class="lb-tab active" onclick="G.showLbTab('1v1',this)">1v1</button>
+      <button class="lb-tab" onclick="G.showLbTab('2v2',this)">2v2</button>
+    </div>
+    <div id="lb-1v1" class="lb-list"></div>
+    <div id="lb-2v2" class="lb-list" style="display:none"></div>
   </div>
-  <div class="elo-disp" style="color:var(--accent2)">ELO Équipe : <span id="elo-team-val">1200</span></div>
-  <button class="mbtn" id="music-btn" onclick="G.toggleMusic()" style="font-size:10px;padding:8px 16px;margin-top:4px">🎵 MUSIQUE : ON</button>
-  <div style="font-family:'VT323',monospace;font-size:12px;color:rgba(255,255,255,.25);margin-top:12px;letter-spacing:1px">All rights reserved © Nicolas Museur</div>
+
+  <!-- ── Centre ─────────────────────────────────── -->
+  <div class="title-center">
+    <div class="logo">ROGUE ARENA</div>
+    <div class="logo-sub">TACTICAL COMBAT</div>
+    <button class="mbtn" onclick="G.startPB()">⚔ 1v1 vs IA</button>
+    <button class="mbtn mbtn-2v2" onclick="G.start2v2PB()">👥 2v2 vs IA</button>
+    <button class="mbtn" onclick="G.showScreen('lobby')" style="border-color:#40c8e8;color:#40c8e8">🌐 MULTIJOUEUR EN LIGNE</button>
+    <button class="mbtn" onclick="document.getElementById('howto').classList.add('vis')">? AIDE</button>
+    <button class="mbtn" onclick="document.getElementById('changelog').classList.add('vis')" style="border-color:#c8a840;color:#c8a840">📋 CHANGELOG</button>
+    <button class="mbtn" style="border-color:#c0c0d0;color:#c0c0d0" onclick="G.openShop()">🏪 BOUTIQUE</button>
+    <div class="elo-disp" style="color:#c0c0d0;display:flex;align-items:center;gap:6px;justify-content:center">
+      <canvas id="ecu-title-icon" width="18" height="18"></canvas>
+      Écus : <span id="ecu-val">0</span>
+    </div>
+    <button class="mbtn" id="music-btn" onclick="G.toggleMusic()" style="font-size:10px;padding:8px 16px;margin-top:4px">🎵 MUSIQUE : ON</button>
+    <div style="font-family:'VT323',monospace;font-size:12px;color:rgba(255,255,255,.25);margin-top:12px;letter-spacing:1px">All rights reserved © Nicolas Museur</div>
+  </div>
+
+  <!-- ── Tchat global droite ────────────────────── -->
+  <div class="title-side-panel" id="chat-panel">
+    <div class="side-panel-title">💬 TCHAT GLOBAL</div>
+    <!-- Pseudo input -->
+    <div style="display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid #1a3a5a">
+      <input id="chat-pseudo-input" maxlength="8" placeholder="Pseudo..."
+        style="flex:1;background:#0a1828;border:1px solid #1a4060;color:#e0f0ff;
+        padding:5px 8px;font-family:inherit;font-size:.72em;border-radius:4px;outline:none"
+        oninput="G.mp.onChatPseudoInput(this)"/>
+      <div id="chat-pseudo-ok" style="color:#40c870;font-size:.7em;align-self:center;min-width:14px"></div>
+    </div>
+    <!-- Messages -->
+    <div id="global-chat-msgs" style="flex:1;overflow-y:auto;padding:6px 8px;
+      display:flex;flex-direction:column;gap:3px;min-height:0"></div>
+    <!-- Input -->
+    <div style="display:flex;gap:6px;padding:6px 8px;border-top:1px solid #1a3a5a">
+      <input id="global-chat-in" placeholder="Message..." maxlength="120"
+        style="flex:1;background:#0a1828;border:1px solid #1a4060;color:#e0f0ff;
+        padding:6px 8px;font-family:inherit;font-size:.75em;border-radius:4px;outline:none"
+        onkeydown="if(event.key==='Enter')G.mp.sendGlobalChat()"/>
+      <button onclick="G.mp.sendGlobalChat()"
+        style="background:#1a3a5a;border:1px solid #2a5a8a;color:#40c8e8;
+        padding:6px 10px;font-family:inherit;border-radius:4px;cursor:pointer;font-size:.8em">↑</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ CHANGELOG ══════════════════════════════════════════════ -->
@@ -3731,6 +3797,14 @@ const G={
   confirmPB2v2(){
     const pb=this.pb;
     if(!pb.sel)return;
+    if(G.mp&&G.mp._isOnline){
+      // Online 2v2: same path as 1v1 — send to server
+      if(!G.mp._pbState||G.mp._pbState.slot!==G.mp.mySlot)return;
+      G.mp._send({type:'pb_action',roomId:G.mp.roomId,heroId:pb.sel,slot:G.mp.mySlot});
+      const cfm=document.getElementById('cfm-btn');
+      if(cfm)cfm.disabled=true;
+      return;
+    }
     const step=PB_SEQ_2V2[pb.step];
     if(!step||step.who!=='player')return;
     clearInterval(pb.iv);
@@ -5229,16 +5303,14 @@ const G={
       if(sk.range>0&&dist(caster.x,caster.y,tx,ty)>sk.range){caster.ap+=sk.cost;return;}
       if(!hasLOS(this.grid,caster.x,caster.y,tx,ty)){this.log('Pas de LDV!','sys');caster.ap+=sk.cost;return;}
       this.doDmg(t,sk.dmg,sk.tags,caster);
-      this.applyFx(t,'stun',1);
-      this.log('💀 PAS D\'OMBRE! Paralysie!','crit');
-      // 1 cumul max d'affaiblissement par cible
+      // Affaiblissement seulement (pas de paralysie — c'est le sort de l'Assassin)
       if(!t.statusEffects||!t.statusEffects.some(s=>s.type==='weaken')){
         this.applyFx(t,'weaken',2);
-        this.log('🔮 '+t.name+' affaibli!','buff');
+        this.log('🔮 Éclair Arcane! '+t.name+' affaibli!','buff');
       } else {
         this.log('🔮 '+t.name+' déjà affaibli.','sys');
       }
-      spawnParticles(tx,ty,4,{color:'#c040ff',type:'spark',vy:1.5,decay:0.05,size:2});
+      spawnParticles(tx,ty,4,{color:'#e8d040',type:'spark',vy:1.5,decay:0.05,size:2});
       return;
     }
     if(ef==='ensnare'){
@@ -7401,6 +7473,11 @@ const G={
         },100);
       }
       this.stopMusic();
+      // Notify server of game result for ELO update
+      if(G.mp&&G.mp._isOnline){
+        const myUnit=G.units.find(u=>u.id===G.mp._myUnitId);
+        G.mp._send({type:'game_over',winner:myUnit?.team||'player',roomId:G.mp.roomId});
+      }
       setTimeout(()=>this.showScreen('res'),900);
       return true;
     }
@@ -8535,6 +8612,20 @@ G.mp = {
         G.mp._log('⚠ ' + msg.msg);
         break;
 
+      case 'leaderboard':
+        G.mp._renderLeaderboard(msg.mode, msg.players || []);
+        break;
+
+      case 'chat_history':
+        (msg.messages || []).forEach(m => G.mp._appendGlobalChat(m.pseudo, m.text, true));
+        const chatEl = document.getElementById('global-chat-msgs');
+        if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+        break;
+
+      case 'global_chat':
+        G.mp._appendGlobalChat(msg.pseudo, msg.text);
+        break;
+
       case 'pb_action':
         G.mp._applyRemotePBAction(msg);
         break;
@@ -9237,15 +9328,85 @@ G.mp = {
   G.castSkill.__original = _origCastSkill;
 })();
 
-// Pré-remplir le pseudo depuis localStorage + compter les chars
+// Pré-remplir le pseudo
 window.addEventListener('load', () => {
-  const input = document.getElementById('lobby-pseudo-input');
-  if (input && G.mp.pseudo) {
-    input.value = G.mp.pseudo;
+  const lobbyIn = document.getElementById('lobby-pseudo-input');
+  if (lobbyIn && G.mp.pseudo) {
+    lobbyIn.value = G.mp.pseudo;
     const countEl = document.getElementById('lobby-pseudo-count');
     if (countEl) countEl.textContent = G.mp.pseudo.length + '/8';
   }
+  const chatIn = document.getElementById('chat-pseudo-input');
+  if (chatIn && G.mp.pseudo) chatIn.value = G.mp.pseudo;
+  // Connect to server for chat/leaderboard even on title screen
+  G.mp._connectBackground();
 });
+
+// ── Leaderboard & Global Chat ─────────────────────────────────
+G.showLbTab = function(mode, btn) {
+  document.querySelectorAll('.lb-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('lb-1v1').style.display = mode==='1v1'?'block':'none';
+  document.getElementById('lb-2v2').style.display = mode==='2v2'?'block':'none';
+};
+
+G.mp._connectBackground = function() {
+  if (this.ws && this.ws.readyState <= 1) return;
+  this.ws = new WebSocket(this.SERVER_URL);
+  this.ws.onopen = () => { this.connected = true; };
+  this.ws.onmessage = (e) => this._onMessage(JSON.parse(e.data));
+  this.ws.onclose = () => { this.connected = false; };
+  this.ws.onerror = () => {};
+};
+
+G.mp.onChatPseudoInput = function(input) {
+  const clean = input.value.replace(/[^a-zA-Z0-9_\-]/g,'').slice(0,8);
+  input.value = clean;
+  const ok = document.getElementById('chat-pseudo-ok');
+  if (ok) ok.textContent = clean.length >= 2 ? '✓' : '';
+  if (clean.length >= 2) {
+    this.pseudo = clean;
+    localStorage.setItem('ra_pseudo', clean);
+    // Sync to lobby pseudo input too
+    const li = document.getElementById('lobby-pseudo-input');
+    if (li && !li.value) li.value = clean;
+  }
+};
+
+G.mp.sendGlobalChat = function() {
+  const inp = document.getElementById('global-chat-in');
+  const text = (inp?.value||'').trim();
+  if (!text || this.pseudo.length < 2) return;
+  if (!this.connected) this._connectBackground();
+  setTimeout(() => {
+    this._send({type:'global_chat', text, pseudo:this.pseudo});
+    if (inp) inp.value = '';
+  }, this.connected ? 0 : 500);
+};
+
+G.mp._appendGlobalChat = function(pseudo, text, isHistory) {
+  const el = document.getElementById('global-chat-msgs');
+  if (!el) return;
+  const d = document.createElement('div');
+  d.className = 'cm';
+  d.innerHTML = `<b>${pseudo}</b>: ${text.replace(/</g,'&lt;')}`;
+  el.appendChild(d);
+  if (el.children.length > 80) el.removeChild(el.firstChild);
+  if (!isHistory) el.scrollTop = el.scrollHeight;
+};
+
+G.mp._renderLeaderboard = function(mode, players) {
+  const el = document.getElementById('lb-'+mode);
+  if (!el) return;
+  const myPseudo = this.pseudo;
+  el.innerHTML = players.length === 0
+    ? '<div style="color:#405060;font-size:.7em;padding:12px;text-align:center">Aucune partie jouée</div>'
+    : players.map((p,i) => `<div class="lb-entry${p.pseudo===myPseudo?' me':''}">
+        <div class="lb-rank">${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)}</div>
+        <div class="lb-pseudo">${p.pseudo}</div>
+        <div class="lb-elo">${p.elo}</div>
+      </div>`).join('');
+};
 // Aussi pré-remplir quand on revient sur l'écran lobby
 const _origShowScreen = G.showScreen.bind(G);
 G.showScreen = function(name) {

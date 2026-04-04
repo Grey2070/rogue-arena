@@ -17,9 +17,28 @@ const uid = () => crypto.randomBytes(6).toString('hex');
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11,19)}]`, ...a);
 
 // ── État global ─────────────────────────────────────────────────
-const queues = { '1v1': [], '2v2': [] };  // files matchmaking
-const rooms  = new Map();                  // roomId → Room
-const players = new Map();                 // ws → Player
+const queues  = { '1v1': [], '2v2': [] }; // files matchmaking
+const rooms   = new Map();                // roomId → Room
+const players = new Map();               // ws → Player
+const eloMap  = { '1v1': new Map(), '2v2': new Map() }; // pseudo → elo
+const CHAT_HISTORY = [];                 // last 50 messages
+const MAX_CHAT = 50;
+
+function getElo(mode, pseudo) { return eloMap[mode]?.get(pseudo) || 1200; }
+function setElo(mode, pseudo, val) {
+  if (!eloMap[mode]) return;
+  eloMap[mode].set(pseudo, Math.max(0, val));
+  broadcastLeaderboard(mode);
+}
+function broadcastLeaderboard(mode) {
+  const entries = [...(eloMap[mode]?.entries()||[])];
+  entries.sort((a,b) => b[1]-a[1]);
+  const top100 = entries.slice(0,100).map(([pseudo,elo])=>({pseudo,elo}));
+  wss.clients.forEach(ws => {
+    if (ws.readyState === 1)
+      ws.send(JSON.stringify({type:'leaderboard', mode, players: top100}));
+  });
+}
 
 // ── Structure Room ───────────────────────────────────────────────
 class Room {
@@ -271,21 +290,34 @@ function handleGameAction(ws, msg) {
   if (!sender) return;
 
   switch(msg.type) {
-    case 'launch_now':
-      // Host lance la partie maintenant
-      // Any player in the room can trigger launch (host is just first-joined)
-      const isInRoom = room.players.some(p => p.ws === ws);
-      if (isInRoom && (room.state === 'waiting' || room.state === 'pick_ban')) {
-        if (!room.isFull()) room.fillWithBots();
-        if (room.state === 'waiting') {
-          room.state = 'pick_ban';
-          startRoom(room);
-        } else {
-          startRoom(room);
-        }
-        log(`Room ${room.id}: lancée manuellement`);
+    case 'launch_now': {
+      // Any player can launch — find their room (even during queue)
+      const pd2 = players.get(ws);
+      const launchRoom = pd2?.room ? rooms.get(pd2.room) : room;
+      if (!launchRoom) {
+        // Still in queue — create immediate room with bots
+        ['1v1','2v2'].forEach(mode2 => {
+          const qi = queues[mode2].findIndex(p => p.ws === ws);
+          if (qi >= 0) {
+            const qp = queues[mode2].splice(qi, 1)[0];
+            clearTimeout(qp.botTimerRef);
+            const nr = new Room(uid(), mode2);
+            nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId, team:'player', isBot:false, slot:0});
+            nr.fillWithBots();
+            rooms.set(nr.id, nr);
+            players.get(ws).room = nr.id;
+            log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
+            startRoom(nr);
+          }
+        });
+      } else if (launchRoom.state === 'waiting' || launchRoom.state === 'pick_ban') {
+        if (!launchRoom.isFull()) launchRoom.fillWithBots();
+        if (launchRoom.state === 'waiting') { launchRoom.state = 'pick_ban'; }
+        startRoom(launchRoom);
+        log(`Room ${launchRoom.id}: lancée manuellement`);
       }
       break;
+    }
     case 'slot_choice': {
       // Player chose their slot/team for 2v2
       const newSlot = msg.slot;
@@ -360,12 +392,31 @@ function handleGameAction(ws, msg) {
       room.broadcast({ type: 'game_state_sync', state: msg.state }, ws);
       break;
 
-    case 'chat': break; // chat désactivé
+    case 'global_chat': {
+      const chatMsg = String(msg.text||'').slice(0,120).trim();
+      if (!chatMsg || !sender.pseudo) break;
+      const entry = { pseudo: sender.pseudo, text: chatMsg, ts: Date.now() };
+      CHAT_HISTORY.push(entry);
+      if (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
+      // Broadcast to ALL connected clients
+      wss.clients.forEach(ws2 => {
+        if (ws2.readyState === 1)
+          ws2.send(JSON.stringify({type:'global_chat', ...entry}));
+      });
+      break;
+    }
+    case 'chat': break; // chat in-game désactivé
 
     case 'game_over':
       room.state = 'finished';
       room.broadcastAll({ type: 'game_over', winner: msg.winner });
       log(`Room ${room.id}: partie terminée (${msg.winner})`);
+      // Update ELO for all players
+      room.players.filter(p=>!p.isBot&&p.pseudo).forEach(p => {
+        const won = msg.winner === p.team;
+        const cur = getElo(room.mode, p.pseudo);
+        setElo(room.mode, p.pseudo, cur + (won ? 25 : -20));
+      });
       setTimeout(() => rooms.delete(room.id), 30000);
       break;
   }
@@ -420,6 +471,17 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (ws, req) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   log(`Connexion depuis ${ip}`);
+  // Send recent chat history and leaderboards
+  setTimeout(() => {
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({type:'chat_history', messages: CHAT_HISTORY}));
+      ['1v1','2v2'].forEach(mode => {
+        const entries = [...(eloMap[mode]?.entries()||[])];
+        entries.sort((a,b) => b[1]-a[1]);
+        ws.send(JSON.stringify({type:'leaderboard', mode, players: entries.slice(0,100).map(([pseudo,elo])=>({pseudo,elo}))}));
+      });
+    }
+  }, 200);
 
   ws.on('message', raw => {
     try {
