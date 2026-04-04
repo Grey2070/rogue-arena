@@ -8406,21 +8406,8 @@ G.mp = {
 
   // ── Lancer maintenant (chef de groupe) ────────────────────────
   launchNow() {
-    if (!this.isHost) return;
-    this._stopTimer();
-    this.timerLeft = 0;
-    // Déclencher le lancement immédiat avec les joueurs présents + bots
-    const qEl = document.getElementById('lobby-queue');
-    if (qEl && qEl.style.display !== 'none') {
-      const slots = G.mp.mode === '1v1' ? 2 : 4;
-      const fakePlayers = [{pseudo: G.mp.pseudo, team: G.mp._pendingTeam||'player', slot:0, isBot:false}];
-      for (let b = 1; b < slots; b++)
-        fakePlayers.push({pseudo:'IA_'+b, team: b<slots/2?'player':'enemy', slot:b, isBot:true});
-      G.mp._send({ type: 'launch_now', roomId: G.mp.roomId });
-      setTimeout(() => {
-        G.mp._startPickBan({ roomId: G.mp.roomId||'local_'+Date.now(), mode: G.mp.mode, players: fakePlayers });
-      }, 300);
-    }
+    // Any player can trigger launch — send to server
+    this._send({ type: 'launch_now', roomId: this.roomId });
   },
 
   // ── Ancien joinLobby conservé pour compatibilité ──────────────
@@ -8470,8 +8457,9 @@ G.mp = {
     switch(msg.type) {
       case 'queue_joined':
         this._showQueueUI(msg);
-        if (!this._timerStarted) { this._startTimer(); this._timerStarted = true; }
-        // Mettre à jour les slots avec les joueurs actuels
+        // Sync timer to server's remaining time (not always 60)
+        this._startTimer(msg.timeout || 60);
+        this._timerStarted = true;
         if (msg.queuePlayers) this._renderSlots(msg.mode, msg.queuePlayers);
         break;
 
@@ -8495,6 +8483,29 @@ G.mp = {
       case 'session_error':
         const codeErrEl = document.getElementById('session-code-err');
         if (codeErrEl) codeErrEl.textContent = '❌ ' + msg.msg;
+        break;
+
+      case 'slot_updated':
+        // Another player chose their slot — update our matchData and UI
+        if (G.mp._teamSelectData) {
+          G.mp._teamSelectData.players = msg.players;
+          // Refresh slot buttons
+          msg.players.forEach(p => {
+            const occ = document.getElementById('ts-occ-'+p.slot);
+            if (occ && !p.isBot) {
+              const isMine = p.pseudo === G.mp.pseudo;
+              const color = p.team === 'player' ? '#4080ff' : '#e04040';
+              occ.innerHTML = isMine
+                ? `<span style="color:${color}">✓ Toi</span>`
+                : `<span style="color:${color}">👤 ${p.pseudo}</span>`;
+            }
+          });
+        }
+        break;
+
+      case 'slot_error':
+        const slotInfoEl = document.getElementById('ts-info');
+        if (slotInfoEl) slotInfoEl.textContent = '❌ ' + msg.msg;
         break;
 
       case 'match_found':
@@ -8772,6 +8783,9 @@ G.mp = {
     });
 
     if (info) info.textContent = `✅ ${slotDef.label} — Lancement dans 2s...`;
+
+    // Send slot choice to server so all clients see the update
+    G.mp._send({ type: 'slot_choice', slot: chosenSlot });
 
     // Launch after 2s
     setTimeout(() => {
@@ -9121,8 +9135,8 @@ G.mp = {
     if (launchBtn) launchBtn.style.display = this.isHost ? 'block' : 'none';
   },
 
-  _startTimer() {
-    this.timerLeft = 60;
+  _startTimer(initial) {
+    this.timerLeft = initial || 60; this._timerInitial = this.timerLeft;
     this._stopTimer();
     this.timerIv = setInterval(() => {
       this.timerLeft--;
@@ -9130,7 +9144,7 @@ G.mp = {
       const arcEl = document.getElementById('lobby-timer-arc');
       if (numEl) numEl.textContent = this.timerLeft;
       if (arcEl) {
-        const pct = this.timerLeft / 60;
+        G.mp._timerInitial = G.mp._timerInitial || 60; const pct = this.timerLeft / G.mp._timerInitial;
         arcEl.style.strokeDashoffset = (238.8 * (1 - pct)).toFixed(1);
         arcEl.style.stroke = this.timerLeft > 20 ? '#40c8e8' : this.timerLeft > 10 ? '#e8a840' : '#e84040';
       }

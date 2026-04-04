@@ -76,12 +76,15 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
   players.set(ws, { ...player, room: null });
   log(`Queue ${mode}: +${pseudo} (${queue.length}/${mode === '1v1' ? 2 : 4})`);
 
-  // Notifier TOUS les joueurs en file de la mise à jour
   const required = mode === '1v1' ? 2 : 4;
+  // First player starts the 60s clock; others sync to remaining time
+  const queueStart = queue[0]?.joinedAt || Date.now();
   queue.forEach((p, idx) => {
-    const playerList = queue.map(q => ({ pseudo: q.pseudo, slot: idx }));
+    const elapsed = Math.floor((Date.now() - queueStart) / 1000);
+    const remaining = Math.max(0, 60 - elapsed);
     send(p.ws, { type: 'queue_joined', mode, position: idx + 1,
-      required, timeout: 60, queuePlayers: queue.map(q => ({ pseudo: q.pseudo })) });
+      required, timeout: remaining,
+      queuePlayers: queue.map(q => ({ pseudo: q.pseudo })) });
   });
 
   // Timer 60s → remplir avec bots
@@ -187,7 +190,7 @@ function startPBStep(room) {
       mode: room.mode,
       players: room.players.map(p=>({ pseudo:p.pseudo, team:p.team, slot:p.slot, isBot:p.isBot }))
     });
-    log(`Room ${room.id}: game started (${room.pbPicks.player} vs ${room.pbPicks.enemy})`);
+    log(`Room ${room.id}: game started picks=${JSON.stringify(room.pbPicks)}`);
     return;
   }
   const step = steps[room.pbStep];
@@ -208,11 +211,14 @@ function startPBStep(room) {
     timeLeft: 15,
     total: steps.length
   });
-  // Auto-pick for bots after 15s
-  const teamPlayer = room.players.find(p => p.team === step.team && !p.isBot);
+  // Auto-pick for bots or AFK after 15s
+  const teamPlayer = room.players.find(p => p.slot === curSlot && !p.isBot);
   if (!teamPlayer) {
-    // Bot picks
-    setTimeout(() => autoPickBot(room, step), 13000);
+    // Bot slot: auto-pick after short delay
+    setTimeout(() => autoPickBot(room, step), 1500);
+  } else {
+    // Human slot: auto-pick only if they go AFK (15s)
+    setTimeout(() => autoPickBot(room, step), 15500);
   }
   // Global timeout 16s
   if (room.pbTimer) clearTimeout(room.pbTimer);
@@ -227,8 +233,8 @@ function autoPickBot(room, step) {
   const steps = room.mode === '2v2' ? PB_STEPS_2V2 : PB_STEPS;
   const currentStep = steps[room.pbStep];
   if (!currentStep || currentStep.team !== step.team || currentStep.type !== step.type) return;
-  const banned = [room.pbBans.player, room.pbBans.enemy].filter(Boolean);
-  const picked = [room.pbPicks.player, room.pbPicks.enemy].filter(Boolean);
+  const banned = Object.values(room.pbBans).filter(Boolean);
+  const picked = Object.values(room.pbPicks).filter(Boolean);
   const used   = [...banned, ...picked];
   const allHeroes = ['pyro','cryo','rogue','paladin','archer','necro','storm','shaman',
     'shadow','berserker','adventurer','smuggler','dragonmaster','runesmith','enchanter',
@@ -267,28 +273,49 @@ function handleGameAction(ws, msg) {
   switch(msg.type) {
     case 'launch_now':
       // Host lance la partie maintenant
-      if (room.players[0]?.ws === ws && room.state === 'pick_ban') {
-        room.players.filter(p=>!p.alive&&!p.isBot).forEach(p=>{
-          if(!room.players.some(x=>x.id===p.id)) return;
-        });
-        // Remplir avec bots et démarrer
+      // Any player in the room can trigger launch (host is just first-joined)
+      const isInRoom = room.players.some(p => p.ws === ws);
+      if (isInRoom && (room.state === 'waiting' || room.state === 'pick_ban')) {
         if (!room.isFull()) room.fillWithBots();
-        startRoom(room);
-        log(`Room ${room.id}: lancée par le host`);
+        if (room.state === 'waiting') {
+          room.state = 'pick_ban';
+          startRoom(room);
+        } else {
+          startRoom(room);
+        }
+        log(`Room ${room.id}: lancée manuellement`);
       }
       break;
+    case 'slot_choice': {
+      // Player chose their slot/team for 2v2
+      const newSlot = msg.slot;
+      if (newSlot === undefined || newSlot === null) break;
+      // Check slot not taken by someone else
+      const alreadyTaken = room.players.find(p => p.slot === newSlot && p.ws !== ws && !p.isBot);
+      if (alreadyTaken) { send(ws, {type:'slot_error', msg:'Slot déjà pris'}); break; }
+      // Update this player's slot and team
+      const sp2 = room.players.find(p => p.ws === ws);
+      if (sp2) {
+        sp2.slot = newSlot;
+        sp2.team = (newSlot === 0 || newSlot === 2) ? 'player' : 'enemy';
+      }
+      // Broadcast updated player list to all
+      room.broadcastAll({ type: 'slot_updated',
+        players: room.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot})) });
+      break;
+    }
     case 'pb_action': {
       // Validate it's this player's turn
       const steps2 = room.mode === '2v2' ? PB_STEPS_2V2 : PB_STEPS;
       const curStep = steps2[room.pbStep];
       if (!curStep || !msg.heroId) break;
-      // Check sender is the right team
-      const senderIsCorrect = sender.team === curStep.team;
+      // Validate by SLOT (not team) — slot determines whose turn it is
+      const senderIsCorrect = sender.slot === curStep.slot;
       if (!senderIsCorrect) { send(ws, { type:'pb_error', msg:'Pas ton tour!' }); break; }
-      // Check hero not already taken
-      const banned2 = [room.pbBans.player, room.pbBans.enemy].filter(Boolean);
-      const picked2 = [room.pbPicks.player, room.pbPicks.enemy].filter(Boolean);
-      if ([...banned2,...picked2].includes(msg.heroId)) {
+      // Check hero not already taken (use all slot values)
+      const allBanned = Object.values(room.pbBans).filter(Boolean);
+      const allPicked = Object.values(room.pbPicks).filter(Boolean);
+      if ([...allBanned,...allPicked].includes(msg.heroId)) {
         send(ws, { type:'pb_error', msg:'Héros déjà pris' }); break;
       }
       applyPBChoice(room, sender.slot, curStep.type, msg.heroId);
