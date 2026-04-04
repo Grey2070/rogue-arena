@@ -16,8 +16,42 @@ const MATCHMAKING_TIMEOUT = 60_000; // 60s avant IA
 const uid = () => crypto.randomBytes(6).toString('hex');
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11,19)}]`, ...a);
 
-// ── Persistance ELO ──────────────────────────────────────────────
+// ── Persistance ELO + Pseudos ────────────────────────────────────
 const fs = require('fs');
+// pseudoRegistry: pseudo.toLowerCase() → { pseudo, ip, lastSeen }
+const pseudoRegistry = new Map();
+const PSEUDO_FILE = './pseudo_data.json';
+
+function loadPseudoData() {
+  try {
+    if (fs.existsSync(PSEUDO_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PSEUDO_FILE, 'utf8'));
+      Object.entries(data).forEach(([k,v]) => pseudoRegistry.set(k, v));
+      log(`Pseudos chargés: ${pseudoRegistry.size}`);
+    }
+  } catch(e) { log('Pseudo load error:', e.message); }
+}
+
+function savePseudoData() {
+  try {
+    fs.writeFileSync(PSEUDO_FILE, JSON.stringify(Object.fromEntries(pseudoRegistry)));
+  } catch(e) {}
+}
+
+function canUsePseudo(pseudo, ip) {
+  const key = pseudo.toLowerCase();
+  const entry = pseudoRegistry.get(key);
+  if (!entry) return true; // never used
+  return entry.ip === ip;   // same IP can reuse their pseudo
+}
+
+function registerPseudo(pseudo, ip) {
+  const key = pseudo.toLowerCase();
+  pseudoRegistry.set(key, { pseudo, ip, lastSeen: Date.now() });
+  savePseudoData();
+}
+
+
 const ELO_FILE = './elo_data.json';
 
 function loadEloData() {
@@ -124,11 +158,13 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
     return send(ws, { type: 'queue_already' });
   }
 
-  // Check pseudo uniqueness
-  if (isPseudoInUse(pseudo)) {
+  // Check pseudo availability for this IP
+  const playerIp = players.get(ws)?._ip || ws._ip || '0.0.0.0';
+  if (!canUsePseudo(pseudo, playerIp)) {
     send(ws, { type: 'pseudo_taken', pseudo });
     return;
   }
+  registerPseudo(pseudo, playerIp);
   const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now() };
   queue.push(player);
   players.set(ws, { ...player, room: null });
@@ -416,12 +452,16 @@ function handleGameAction(ws, msg) {
       // Reset turn timeout when player acts
       if (msg.action?.type === 'end_turn') {
         if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
-        // Start timer for next turn (45s)
+        room.turnStartedAt = Date.now();
+        room.turnDuration  = 30; // seconds
+        // Broadcast turn start with sync timestamp
+        room.broadcastAll({ type: 'turn_sync', timeLeft: room.turnDuration, ts: Date.now() });
+        // Timeout if player AFK
         room.turnTimer = setTimeout(() => {
           if (room.state !== 'playing') return;
-          log(`Room ${room.id}: turn timeout — forcing end_turn`);
+          log(`Room ${room.id}: turn timeout`);
           room.broadcastAll({ type: 'turn_timeout' });
-        }, 45000);
+        }, room.turnDuration * 1000 + 2000); // +2s buffer
       }
       break;
     }
@@ -502,7 +542,7 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (ws, req) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   log(`Connexion depuis ${ip}`);
-  // Send recent chat history and leaderboards
+  ws._ip = ip; // Store IP on socket for pseudo checks
   setTimeout(() => {
     if (ws.readyState === 1) {
       ws.send(JSON.stringify({type:'chat_history', messages: CHAT_HISTORY}));
@@ -598,12 +638,13 @@ wss.on('connection', (ws, req) => {
           if (!newPseudo) break;
           // Check if taken by another connection
           const pd3 = players.get(ws);
-          const takenBy = [...players.entries()].find(([w,p]) => w!==ws && p.pseudo?.toLowerCase()===newPseudo.toLowerCase());
-          if (takenBy) {
+          const clientIp2 = ws._ip || '0.0.0.0';
+          if (!canUsePseudo(newPseudo, clientIp2)) {
             send(ws, {type:'pseudo_taken', pseudo: newPseudo});
           } else {
+            registerPseudo(newPseudo, clientIp2);
             if (pd3) pd3.pseudo = newPseudo;
-            else players.set(ws, {pseudo:newPseudo, sessionId:msg.sessionId, room:null});
+            else players.set(ws, {pseudo:newPseudo, sessionId:msg.sessionId, room:null, _ip:clientIp2});
             send(ws, {type:'pseudo_ok', pseudo: newPseudo});
           }
           break;
@@ -637,6 +678,7 @@ setInterval(() => {
 server.listen(PORT, () => {
   log(`Rogue Arena Server démarré sur le port ${PORT}`);
   loadEloData();
+  loadPseudoData();
 });
 
 // ── Stats console ────────────────────────────────────────────────
