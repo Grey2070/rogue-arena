@@ -159,13 +159,14 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
   }
 
   // Check pseudo availability for this IP
-  const playerIp = players.get(ws)?._ip || ws._ip || '0.0.0.0';
+  const playerIp = ws._ip || players.get(ws)?._ip || '0.0.0.0';
   if (!canUsePseudo(pseudo, playerIp)) {
     send(ws, { type: 'pseudo_taken', pseudo });
     return;
   }
   registerPseudo(pseudo, playerIp);
-  const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now() };
+  const playerIp2 = ws._ip || '0.0.0.0';
+  const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now(), _ip: playerIp2 };
   queue.push(player);
   players.set(ws, { ...player, room: null });
   log(`Queue ${mode}: +${pseudo} (${queue.length}/${mode === '1v1' ? 2 : 4})`);
@@ -256,10 +257,10 @@ function startRoom(room) {
 
 // PB sequence: ban1(player), ban2(enemy), pick1(player), pick2(enemy)
 const PB_STEPS = [
-  { team: 'player', type: 'ban'  },
-  { team: 'enemy',  type: 'ban'  },
-  { team: 'player', type: 'pick' },
-  { team: 'enemy',  type: 'pick' },
+  { team: 'player', type: 'ban',  slot: 0 },
+  { team: 'enemy',  type: 'ban',  slot: 1 },
+  { team: 'player', type: 'pick', slot: 0 },
+  { team: 'enemy',  type: 'pick', slot: 1 },
 ];
 const PB_STEPS_2V2 = [
   { team: 'player', type: 'ban',  slot: 0 },  // Joueur 1 ban
@@ -373,28 +374,36 @@ function handleGameAction(ws, msg) {
 
   switch(msg.type) {
     case 'launch_now': {
-      // Any player can launch — find their room (even during queue)
       const pd2 = players.get(ws);
-      const launchRoom = pd2?.room ? rooms.get(pd2.room) : room;
+      let launchRoom = pd2?.room ? rooms.get(pd2.room) : null;
+
       if (!launchRoom) {
-        // Still in queue — create immediate room with bots
-        ['1v1','2v2'].forEach(mode2 => {
+        // Find in queue and create room immediately
+        for (const mode2 of ['1v1','2v2']) {
           const qi = queues[mode2].findIndex(p => p.ws === ws);
-          if (qi >= 0) {
-            const qp = queues[mode2].splice(qi, 1)[0];
-            clearTimeout(qp.botTimerRef);
-            const nr = new Room(uid(), mode2);
-            nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId, team:'player', isBot:false, slot:0});
-            nr.fillWithBots();
-            rooms.set(nr.id, nr);
-            players.get(ws).room = nr.id;
-            log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
-            startRoom(nr);
-          }
-        });
-      } else if (launchRoom.state === 'waiting' || launchRoom.state === 'pick_ban') {
+          if (qi < 0) continue;
+          const qp = queues[mode2].splice(qi, 1)[0];
+          clearTimeout(qp.botTimerRef);
+          const nr = new Room(uid(), mode2);
+          nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId,
+            team:'player', isBot:false, slot:0, _ip:ws._ip||'0.0.0.0'});
+          nr.fillWithBots();
+          rooms.set(nr.id, nr);
+          if (pd2) pd2.room = nr.id;
+          else players.set(ws, {pseudo:qp.pseudo,sessionId:qp.sessionId,room:nr.id,_ip:ws._ip||'0.0.0.0'});
+          // Send match_found so client knows the room
+          send(ws, { type:'match_found', roomId:nr.id, mode:mode2,
+            players: nr.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot})) });
+          log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
+          launchRoom = nr;
+          break;
+        }
+      }
+
+      if (launchRoom && (launchRoom.state === 'waiting' || launchRoom.state === 'playing')) {
+        // Already handled above or in wrong state
+      } else if (launchRoom) {
         if (!launchRoom.isFull()) launchRoom.fillWithBots();
-        if (launchRoom.state === 'waiting') { launchRoom.state = 'pick_ban'; }
         startRoom(launchRoom);
         log(`Room ${launchRoom.id}: lancée manuellement`);
       }
@@ -424,7 +433,9 @@ function handleGameAction(ws, msg) {
       const curStep = steps2[room.pbStep];
       if (!curStep || !msg.heroId) break;
       // Validate by SLOT (not team) — slot determines whose turn it is
-      const senderIsCorrect = sender.slot === curStep.slot;
+      const senderIsCorrect = (curStep.slot !== undefined)
+        ? sender.slot === curStep.slot
+        : sender.team === curStep.team;
       if (!senderIsCorrect) { send(ws, { type:'pb_error', msg:'Pas ton tour!' }); break; }
       // Check hero not already taken (use all slot values)
       const allBanned = Object.values(room.pbBans).filter(Boolean);
