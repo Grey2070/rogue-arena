@@ -18,7 +18,8 @@ const log = (...a) => console.log(`[${new Date().toISOString().slice(11,19)}]`, 
 
 // ── Persistance ELO + Pseudos ────────────────────────────────────
 const fs = require('fs');
-// pseudoRegistry: pseudo.toLowerCase() → { pseudo, ip, lastSeen }
+// ══ Registre des pseudos persistants ════════════════════════
+// pseudoRegistry: pseudo.toLowerCase() → { pseudo, sessionId, ip, lastSeen }
 const pseudoRegistry = new Map();
 const PSEUDO_FILE = './pseudo_data.json';
 
@@ -29,36 +30,46 @@ function loadPseudoData() {
       Object.entries(data).forEach(([k,v]) => pseudoRegistry.set(k, v));
       log(`Pseudos chargés: ${pseudoRegistry.size}`);
     }
-  } catch(e) { log('Pseudo load error:', e.message); }
+  } catch(e) { log('Pseudo load:', e.message); }
 }
 
 function savePseudoData() {
-  // Only save pseudos seen in the last 24h to avoid stale blocks
   try {
-    const cutoff = Date.now() - 24*3600*1000;
-    const toSave = {};
-    pseudoRegistry.forEach((v,k) => { if(v.lastSeen > cutoff) toSave[k] = v; });
-    fs.writeFileSync(PSEUDO_FILE, JSON.stringify(toSave));
+    fs.writeFileSync(PSEUDO_FILE,
+      JSON.stringify(Object.fromEntries(pseudoRegistry)));
   } catch(e) {}
 }
 
-function canUsePseudo(pseudo, ip, currentPseudo) {
+// Un joueur peut utiliser un pseudo si :
+// 1. Le pseudo n'est jamais enregistré
+// 2. C'est son sessionId (même navigateur/appareil)
+// 3. C'est son IP (même réseau, navigateur différent)
+function canUsePseudo(pseudo, sessionId, ip) {
   const key = pseudo.toLowerCase();
   const entry = pseudoRegistry.get(key);
-  if (!entry) return true;
-  if (entry.ip === ip) return true; // same IP = same player
-  // Allow if currently connected with this pseudo (reconnect case)
-  for (const [, pd] of players.entries()) {
-    if (pd.pseudo?.toLowerCase() === key && pd._ip === ip) return true;
-  }
+  if (!entry) return true;                   // jamais utilisé
+  if (entry.sessionId === sessionId) return true; // même session
+  if (ip && ip !== '0.0.0.0' && entry.ip === ip) return true; // même IP
   return false;
 }
 
-function registerPseudo(pseudo, ip) {
+function registerPseudo(pseudo, sessionId, ip) {
   const key = pseudo.toLowerCase();
-  pseudoRegistry.set(key, { pseudo, ip, lastSeen: Date.now() });
+  pseudoRegistry.set(key, { pseudo, sessionId, ip, lastSeen: Date.now() });
   savePseudoData();
 }
+
+// Quand un joueur se connecte, mettre à jour son entrée si c'est le sien
+function refreshPseudoEntry(pseudo, sessionId, ip) {
+  if (!pseudo) return;
+  const key = pseudo.toLowerCase();
+  const entry = pseudoRegistry.get(key);
+  if (!entry || entry.sessionId === sessionId || (ip && entry.ip === ip)) {
+    pseudoRegistry.set(key, { pseudo, sessionId, ip, lastSeen: Date.now() });
+    savePseudoData();
+  }
+}
+
 
 
 const ELO_FILE = './elo_data.json';
@@ -167,15 +178,13 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
     return send(ws, { type: 'queue_already' });
   }
 
-  // Check pseudo availability for this IP
-  const playerIp = ws._ip || players.get(ws)?._ip || '0.0.0.0';
-  if (!canUsePseudo(pseudo, playerIp)) {
+  const playerIp = ws._ip || '0.0.0.0';
+  if (!canUsePseudo(pseudo, sessionId, playerIp)) {
     send(ws, { type: 'pseudo_taken', pseudo });
     return;
   }
-  registerPseudo(pseudo, playerIp);
-  const playerIp2 = ws._ip || '0.0.0.0';
-  const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now(), _ip: playerIp2 };
+  registerPseudo(pseudo, sessionId, playerIp);
+  const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now(), _ip: playerIp };
   queue.push(player);
   players.set(ws, { ...player, room: null });
   log(`Queue ${mode}: +${pseudo} (${queue.length}/${mode === '1v1' ? 2 : 4})`);
@@ -404,14 +413,14 @@ function handleGameAction(ws, msg) {
           send(ws, { type:'match_found', roomId:nr.id, mode:mode2,
             players: nr.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot})) });
           log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
+          startRoom(nr); // Start immediately after creating from queue
           launchRoom = nr;
           break;
         }
       }
 
-      if (launchRoom && (launchRoom.state === 'waiting' || launchRoom.state === 'playing')) {
-        // Already handled above or in wrong state
-      } else if (launchRoom) {
+      // Always start the room if we have one (queue case already called startRoom via match_found)
+      if (launchRoom && launchRoom.state !== 'playing' && launchRoom.state !== 'pick_ban') {
         if (!launchRoom.isFull()) launchRoom.fillWithBots();
         startRoom(launchRoom);
         log(`Room ${launchRoom.id}: lancée manuellement`);
@@ -554,15 +563,9 @@ function onDisconnect(ws) {
     }
   }
 
-  // Free the pseudo registry entry on disconnect (allow reconnect with same pseudo)
-  // But only remove if this is the registered IP
-  if (pd.pseudo) {
-    const key = pd.pseudo.toLowerCase();
-    const entry = pseudoRegistry.get(key);
-    if (entry && entry.ip === pd._ip) {
-      // Update lastSeen but keep the entry (so same IP can reclaim it)
-      entry.lastSeen = Date.now();
-    }
+  // Keep pseudo registered (tied to sessionId+IP) even after disconnect
+  if (pd.pseudo && pd.sessionId) {
+    refreshPseudoEntry(pd.pseudo, pd.sessionId, pd._ip || '0.0.0.0');
   }
   players.delete(ws);
   log(`Déconnexion: ${pd.pseudo}`);
@@ -656,10 +659,18 @@ wss.on('connection', (ws, req) => {
           send(ws, { type: 'pong', ts: Date.now() });
           break;
         case 'global_chat': {
-          // Handle at top level — no room needed
           const chatMsg2 = String(msg.text||'').slice(0,120).trim();
-          const chatPseudo = msg.pseudo?.slice(0,20) || players.get(ws)?.pseudo || 'Anonyme';
+          const chatPseudo = (msg.pseudo?.slice(0,20)||players.get(ws)?.pseudo||'').trim();
           if (!chatMsg2 || chatPseudo.length < 2) break;
+          // Register/refresh pseudo for this connection
+          const chatSid = players.get(ws)?.sessionId || msg.sessionId || '';
+          const chatIp  = ws._ip || '0.0.0.0';
+          if (canUsePseudo(chatPseudo, chatSid, chatIp)) {
+            refreshPseudoEntry(chatPseudo, chatSid, chatIp);
+            const pd = players.get(ws);
+            if (pd) pd.pseudo = chatPseudo;
+            else players.set(ws, {pseudo:chatPseudo, sessionId:chatSid, room:null, _ip:chatIp});
+          }
           const entry2 = { pseudo: chatPseudo, text: chatMsg2, ts: Date.now() };
           CHAT_HISTORY.push(entry2);
           while (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
@@ -675,13 +686,14 @@ wss.on('connection', (ws, req) => {
           if (!newPseudo) break;
           // Check if taken by another connection
           const pd3 = players.get(ws);
-          const clientIp2 = ws._ip || '0.0.0.0';
-          if (!canUsePseudo(newPseudo, clientIp2)) {
+          const sid3 = msg.sessionId || pd3?.sessionId || '';
+          const ip3  = ws._ip || '0.0.0.0';
+          if (!canUsePseudo(newPseudo, sid3, ip3)) {
             send(ws, {type:'pseudo_taken', pseudo: newPseudo});
           } else {
-            registerPseudo(newPseudo, clientIp2);
-            if (pd3) pd3.pseudo = newPseudo;
-            else players.set(ws, {pseudo:newPseudo, sessionId:msg.sessionId, room:null, _ip:clientIp2});
+            registerPseudo(newPseudo, sid3, ip3);
+            if (pd3) { pd3.pseudo = newPseudo; pd3.sessionId = sid3; pd3._ip = ip3; }
+            else players.set(ws, {pseudo:newPseudo, sessionId:sid3, room:null, _ip:ip3});
             send(ws, {type:'pseudo_ok', pseudo: newPseudo});
           }
           break;
