@@ -40,7 +40,7 @@ canvas{image-rendering:pixelated;display:block}
   margin:0 auto;/* Always centered regardless of side panels */}
 /* Side panels: fixed to screen edges, half-height, collapsible */
 .title-side-panel{position:absolute;top:50%;transform:translateY(-50%);
-  width:275px;max-height:70vh;display:flex;flex-direction:column;
+  width:310px;max-height:72vh;display:flex;flex-direction:column;
   background:rgba(4,12,26,.92);border:1px solid #1a3050;border-radius:8px;
   overflow:hidden;transition:width .3s,opacity .3s;z-index:10}
 #leaderboard-panel{left:10px}
@@ -49,7 +49,7 @@ canvas{image-rendering:pixelated;display:block}
 .title-side-panel.collapsed .side-panel-body{display:none}
 .side-panel-toggle{position:absolute;top:8px;right:8px;background:none;border:none;
   color:#40c8e8;cursor:pointer;font-size:.8em;padding:0;line-height:1;z-index:2}
-.side-panel-title{padding:9px 32px 9px 10px;font-size:.68em;letter-spacing:2px;
+.side-panel-title{padding:10px 34px 10px 12px;font-size:.74em;letter-spacing:2px;
   color:#40c8e8;border-bottom:1px solid #1a3050;flex-shrink:0;white-space:nowrap;
   cursor:pointer;user-select:none}
 .title-side-panel.collapsed .side-panel-title{writing-mode:vertical-lr;
@@ -61,14 +61,14 @@ canvas{image-rendering:pixelated;display:block}
   border-bottom:2px solid transparent;transition:all .2s}
 .lb-tab.active{color:#40c8e8;border-bottom-color:#40c8e8}
 .lb-list{overflow-y:auto;max-height:calc(70vh - 80px);padding:2px 0}
-.lb-entry{display:flex;align-items:center;gap:6px;padding:4px 10px;
-  font-size:.68em;border-bottom:1px solid rgba(255,255,255,.04)}
+.lb-entry{display:flex;align-items:center;gap:8px;padding:6px 12px;
+  font-size:.76em;border-bottom:1px solid rgba(255,255,255,.05)}
 .lb-entry.me{background:rgba(64,128,255,.12);color:#80b0ff}
-.lb-rank{color:#607080;min-width:18px;text-align:right;font-size:.9em}
+.lb-rank{color:#607080;min-width:22px;text-align:right;font-size:.95em}
 .lb-pseudo{flex:1;color:#c0d8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lb-elo{color:#c8a840;font-weight:bold;min-width:32px;text-align:right}
-#global-chat-msgs .cm{font-size:.7em;color:#a0b8c8;word-break:break-word;
-  padding:2px 0;line-height:1.4}
+.lb-elo{color:#c8a840;font-weight:bold;min-width:36px;text-align:right}
+#global-chat-msgs .cm{font-size:.78em;color:#a0b8c8;word-break:break-word;
+  padding:3px 0;line-height:1.5}
 #global-chat-msgs .cm b{color:#40c8e8}
 @media(max-width:768px){
   /* On mobile: panels are hidden by default, accessible via small edge tabs */
@@ -522,7 +522,7 @@ canvas{image-rendering:pixelated;display:block}
 .lobby-label{color:#a0b8c8;font-size:.78em;letter-spacing:2px;text-transform:uppercase}
 .lobby-mode-label{color:#607080;font-size:.72em;letter-spacing:2px;margin-top:6px}
 .lobby-mode-btn{width:100%;display:flex;align-items:center;justify-content:center;
-  gap:10px;padding:13px 20px;font-size:.9em;position:relative}
+  gap:12px;padding:14px 24px;font-size:.95em;position:relative;white-space:nowrap;min-width:260px}
 .lobby-mode-sub{font-size:.68em;color:#607080;font-weight:normal;opacity:.8;margin-left:auto;padding-left:8px}
 #lobby-pseudo-input::placeholder{color:#304050}
 #lobby-pseudo-input:focus{border-color:#40c8e8}
@@ -6582,16 +6582,26 @@ const G={
         this.renderUnitList('ally-list',this.units.filter(u=>u.team==='player'));
         this.renderUnitList('enemy-list',this.units.filter(u=>u.team==='enemy'));
       }
-      // Online: ne pas lancer l'IA pour les unités adverses
-      if(G.mp&&G.mp._isOnline&&u.id!==G.mp._myUnitId){
-        this.log('⏳ Tour de '+u.name+'...','sys');
-        // Si ce joueur est déconnecté (bot), l'IA locale prend le relais
-        if(u._botFallback){
-          setTimeout(()=>this.runAI(u), 800);
+      // Online: handle turn routing
+      if(G.mp&&G.mp._isOnline){
+        const isMyMainUnit = (u.id===G.mp._myUnitId);
+        // Servants/clones: run AI if the owner is my unit
+        const isMyServant = (u.isServant||u.isClone) &&
+          (u.servantOwner===G.mp._myUnitId||u.cloneOwner===G.mp._myUnitId);
+        // Turrets: run AI if owned by my unit
+        const isMyTurret = u._isTurret && u.owner===G.mp._myUnitId;
+        const isMyEntity = isMyMainUnit||isMyServant||isMyTurret;
+        if(!isMyEntity){
+          this.log('⏳ Tour de '+u.name+'...','sys');
+          if(u._botFallback){setTimeout(()=>this.runAI(u),800);return;}
           return;
         }
-        // Sinon attendre game_action du serveur
-        return;
+        // My entity (servant/clone/turret) → run AI locally
+        if(!isMyMainUnit){
+          setTimeout(()=>this.runAI(u),400);
+          return;
+        }
+        // My main unit → human turn (falls through to isHumanTurn below)
       }
       const delay=this.mode==='2v2'?1200:500;
       setTimeout(()=>this.runAI(u),delay);
