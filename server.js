@@ -431,20 +431,6 @@ function handleGameAction(ws, msg) {
       room.broadcast({ type: 'game_state_sync', state: msg.state }, ws);
       break;
 
-    case 'global_chat': {
-      const chatMsg = String(msg.text||'').slice(0,120).trim();
-      if (!chatMsg || !sender?.pseudo) break;
-      const entry = { pseudo: sender.pseudo, text: chatMsg, ts: Date.now() };
-      CHAT_HISTORY.push(entry);
-      while (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
-      // Broadcast to ALL connected clients with timestamp
-      const chatBroadcast = JSON.stringify({type:'global_chat', ...entry});
-      wss.clients.forEach(ws2 => {
-        if (ws2.readyState === WebSocket.OPEN)
-          ws2.send(chatBroadcast);
-      });
-      break;
-    }
     case 'chat': break; // chat in-game désactivé
 
     case 'game_over':
@@ -587,6 +573,21 @@ wss.on('connection', (ws, req) => {
         case 'ping':
           send(ws, { type: 'pong', ts: Date.now() });
           break;
+        case 'global_chat': {
+          // Handle at top level — no room needed
+          const chatMsg2 = String(msg.text||'').slice(0,120).trim();
+          const chatPseudo = msg.pseudo?.slice(0,20) || players.get(ws)?.pseudo || 'Anonyme';
+          if (!chatMsg2 || chatPseudo.length < 2) break;
+          const entry2 = { pseudo: chatPseudo, text: chatMsg2, ts: Date.now() };
+          CHAT_HISTORY.push(entry2);
+          while (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
+          const chatBcast = JSON.stringify({type:'global_chat', ...entry2});
+          wss.clients.forEach(w2 => { if (w2.readyState === WebSocket.OPEN) w2.send(chatBcast); });
+          // Register player if not known
+          if (!players.has(ws)) players.set(ws, {pseudo:chatPseudo, sessionId:uid(), room:null});
+          else if (players.get(ws)) players.get(ws).pseudo = chatPseudo;
+          break;
+        }
         case 'set_pseudo': {
           const newPseudo = String(msg.pseudo||'').slice(0,20).trim();
           if (!newPseudo) break;
