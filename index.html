@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>ROGUE ARENA</title>
+<title>ROGUE ARENA ONLINE</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
 :root{
@@ -36,7 +36,8 @@ canvas{image-rendering:pixelated;display:block}
   background:radial-gradient(ellipse at 50% 35%,#160a2a 0%,#080a0f 65%);
   padding:0;position:relative;overflow:hidden}
 .title-center{display:flex;flex-direction:column;align-items:center;
-  justify-content:center;padding:20px 10px;width:340px;z-index:1}
+  justify-content:center;padding:20px 10px;width:340px;z-index:1;
+  margin:0 auto;/* Always centered regardless of side panels */}
 /* Side panels: fixed to screen edges, half-height, collapsible */
 .title-side-panel{position:absolute;top:50%;transform:translateY(-50%);
   width:275px;max-height:70vh;display:flex;flex-direction:column;
@@ -522,7 +523,7 @@ canvas{image-rendering:pixelated;display:block}
 .lobby-mode-label{color:#607080;font-size:.72em;letter-spacing:2px;margin-top:6px}
 .lobby-mode-btn{width:100%;display:flex;align-items:center;justify-content:center;
   gap:10px;padding:13px 20px;font-size:.9em;position:relative}
-.lobby-mode-sub{position:absolute;right:14px;font-size:.7em;color:#607080;font-weight:normal}
+.lobby-mode-sub{font-size:.68em;color:#607080;font-weight:normal;opacity:.8;margin-left:auto;padding-left:8px}
 #lobby-pseudo-input::placeholder{color:#304050}
 #lobby-pseudo-input:focus{border-color:#40c8e8}
 .lobby-slot{width:52px;height:52px;border:2px solid #1a3a5a;border-radius:8px;
@@ -564,7 +565,7 @@ canvas{image-rendering:pixelated;display:block}
 
   <!-- ── Centre ─────────────────────────────────── -->
   <div class="title-center">
-    <div class="logo">ROGUE ARENA</div>
+    <div class="logo" style="font-size:clamp(1.2em,4vw,2em);white-space:nowrap">ROGUE ARENA ONLINE</div>
     <div class="logo-sub">TACTICAL COMBAT</div>
     <button class="mbtn" onclick="G.startPB()">⚔ 1v1 vs IA</button>
     <button class="mbtn mbtn-2v2" onclick="G.start2v2PB()">👥 2v2 vs IA</button>
@@ -8008,7 +8009,9 @@ const G={
   startTurnTimer(isPlayer){
     this.resetTurnTimer();
     if(!isPlayer)return;
-    const MAX=30;
+    // In online mode, use server-synced time if available
+    const MAX=(G.mp&&G.mp._isOnline&&this._syncedTurnTime)?this._syncedTurnTime:30;
+    this._syncedTurnTime=null; // consume
     this.turnTimeLeft=MAX;
     const updateDisplay=()=>{
       const t=this.turnTimeLeft;
@@ -8741,8 +8744,14 @@ G.mp = {
       case 'chat': break; // chat désactivé
 
       case 'game_over':
-        // Server confirmed game over — update ELO display and leaderboard
-        // The server already called setElo, leaderboard update will come separately
+        break;
+
+      case 'turn_sync':
+        // Sync turn timer from server
+        if (G.phase === 'game' && G.startTurnTimer) {
+          const remaining = msg.timeLeft - Math.floor((Date.now() - msg.ts) / 1000);
+          G._syncedTurnTime = Math.max(1, remaining);
+        }
         break;
 
       case 'turn_timeout':
@@ -9011,17 +9020,31 @@ G.mp = {
   _launchOnlineGame(matchData) {
     G.mp.mode = matchData.mode;
     G.mode = matchData.mode;
-    G.mp._isOnline = true;
+    G.mp._isOnline = true;   // Set BEFORE any PB init
     G.mp._matchData = matchData;
-    // Determine my team from server assignment
     const me = matchData.players.find(p => p.slot === G.mp.mySlot);
     G.mp._myTeam = me?.team || 'player';
-    // Initialize PB screen — server will send pb_turn to drive it
-    if (matchData.mode === '1v1') G.startPB();
-    else G.start2v2PB();
-    // Disable confirm button until server sends pb_turn
+
+    // Initialize PB state WITHOUT resetting _isOnline
+    // startPB/start2v2PB would reset _isOnline — bypass them
+    const mode = matchData.mode;
+    G.pb = {step:0,playerBan:null,enemyBan:null,playerPick:null,enemyPick:null,
+      sel:null,timer:15,iv:null,banA:[],banB:[],picksA:[],picksB:[]};
+    G.showScreen('pb');
+
+    // For 2v2, render the 2v2 PB layout
+    if (mode === '2v2') {
+      G.renderPB2v2(false);
+    } else {
+      G.renderPB();
+    }
+
+    // Disable confirm — server sends pb_turn to activate
     const cfm = document.getElementById('cfm-btn');
     if (cfm) cfm.disabled = true;
+
+    // Online: startPBTurn is blocked, server drives via pb_turn messages
+    // No need to call startPBTurn/startPBTurn2v2
   },
 
   // ── Envoyer une action de jeu ──────────────────────────────────
@@ -9586,8 +9609,9 @@ G.showScreen = function(name) {
   if (name === 'title' && G.mp) {
     G.mp._isOnline = false;
     G.mp._pbState  = null;
-    G.mp.roomId    = null;  // Clear room so isOnlinePB = false in vs IA
+    G.mp.roomId    = null;
   }
+  // Do NOT reset _isOnline when showing 'pb' or 'game' — online game uses these screens
   if (name === 'lobby') {
     const input = document.getElementById('lobby-pseudo-input');
     if (input && G.mp.pseudo && !input.value) {
