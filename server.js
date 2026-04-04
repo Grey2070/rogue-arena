@@ -236,9 +236,16 @@ function tryMatch(mode) {
 function startRoom(room) {
   room.state = 'pick_ban';
   room.pbStep  = 0;
-  room.pbBans  = {};   // slot -> heroId
-  room.pbPicks = {};   // slot -> heroId
+  room.pbBans  = {};
+  room.pbPicks = {};
   room.pbTimer = null;
+  // Update pd.room for all players so handleGameAction can find the room
+  room.players.forEach(p => {
+    if (p.ws) {
+      const pd = players.get(p.ws);
+      if (pd) pd.room = room.id;
+    }
+  });
   const playerList = room.players.map(p => ({
     pseudo: p.pseudo, team: p.team, slot: p.slot, isBot: p.isBot
   }));
