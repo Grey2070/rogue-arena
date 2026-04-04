@@ -16,6 +16,31 @@ const MATCHMAKING_TIMEOUT = 60_000; // 60s avant IA
 const uid = () => crypto.randomBytes(6).toString('hex');
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11,19)}]`, ...a);
 
+// ── Persistance ELO ──────────────────────────────────────────────
+const fs = require('fs');
+const ELO_FILE = './elo_data.json';
+
+function loadEloData() {
+  try {
+    if (fs.existsSync(ELO_FILE)) {
+      const data = JSON.parse(fs.readFileSync(ELO_FILE, 'utf8'));
+      if (data['1v1']) Object.entries(data['1v1']).forEach(([k,v]) => eloMap['1v1'].set(k,v));
+      if (data['2v2']) Object.entries(data['2v2']).forEach(([k,v]) => eloMap['2v2'].set(k,v));
+      log(`ELO data loaded: ${eloMap['1v1'].size} joueurs 1v1, ${eloMap['2v2'].size} joueurs 2v2`);
+    }
+  } catch(e) { log('ELO load error:', e.message); }
+}
+
+function saveEloData() {
+  try {
+    const data = {
+      '1v1': Object.fromEntries(eloMap['1v1']),
+      '2v2': Object.fromEntries(eloMap['2v2'])
+    };
+    fs.writeFileSync(ELO_FILE, JSON.stringify(data));
+  } catch(e) { log('ELO save error:', e.message); }
+}
+
 // ── État global ─────────────────────────────────────────────────
 const queues  = { '1v1': [], '2v2': [] }; // files matchmaking
 const rooms   = new Map();                // roomId → Room
@@ -24,11 +49,12 @@ const eloMap  = { '1v1': new Map(), '2v2': new Map() }; // pseudo → elo
 const CHAT_HISTORY = [];                 // last 50 messages
 const MAX_CHAT = 50;
 
-function getElo(mode, pseudo) { return eloMap[mode]?.get(pseudo) || 1200; }
+function getElo(mode, pseudo) { return eloMap[mode]?.get(pseudo) || 1000; }
 function setElo(mode, pseudo, val) {
   if (!eloMap[mode]) return;
   eloMap[mode].set(pseudo, Math.max(0, val));
   broadcastLeaderboard(mode);
+  saveEloData(); // Persist immediately
 }
 function broadcastLeaderboard(mode) {
   const entries = [...(eloMap[mode]?.entries()||[])];
@@ -81,6 +107,14 @@ class Room {
 }
 
 // ── Matchmaking ──────────────────────────────────────────────────
+function isPseudoInUse(pseudo) {
+  // Check if pseudo is used by any connected player
+  for (const [ws, pd] of players.entries()) {
+    if (pd.pseudo && pd.pseudo.toLowerCase() === pseudo.toLowerCase()) return true;
+  }
+  return false;
+}
+
 function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
   const queue = queues[mode];
   if (!queue) return send(ws, { type: 'error', msg: 'Mode invalide' });
@@ -90,6 +124,11 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
     return send(ws, { type: 'queue_already' });
   }
 
+  // Check pseudo uniqueness
+  if (isPseudoInUse(pseudo)) {
+    send(ws, { type: 'pseudo_taken', pseudo });
+    return;
+  }
   const player = { ws, pseudo, sessionId, mode, preferredTeam, joinedAt: Date.now() };
   queue.push(player);
   players.set(ws, { ...player, room: null });
@@ -394,14 +433,15 @@ function handleGameAction(ws, msg) {
 
     case 'global_chat': {
       const chatMsg = String(msg.text||'').slice(0,120).trim();
-      if (!chatMsg || !sender.pseudo) break;
+      if (!chatMsg || !sender?.pseudo) break;
       const entry = { pseudo: sender.pseudo, text: chatMsg, ts: Date.now() };
       CHAT_HISTORY.push(entry);
-      if (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
-      // Broadcast to ALL connected clients
+      while (CHAT_HISTORY.length > MAX_CHAT) CHAT_HISTORY.shift();
+      // Broadcast to ALL connected clients with timestamp
+      const chatBroadcast = JSON.stringify({type:'global_chat', ...entry});
       wss.clients.forEach(ws2 => {
-        if (ws2.readyState === 1)
-          ws2.send(JSON.stringify({type:'global_chat', ...entry}));
+        if (ws2.readyState === WebSocket.OPEN)
+          ws2.send(chatBroadcast);
       });
       break;
     }
@@ -547,6 +587,21 @@ wss.on('connection', (ws, req) => {
         case 'ping':
           send(ws, { type: 'pong', ts: Date.now() });
           break;
+        case 'set_pseudo': {
+          const newPseudo = String(msg.pseudo||'').slice(0,20).trim();
+          if (!newPseudo) break;
+          // Check if taken by another connection
+          const pd3 = players.get(ws);
+          const takenBy = [...players.entries()].find(([w,p]) => w!==ws && p.pseudo?.toLowerCase()===newPseudo.toLowerCase());
+          if (takenBy) {
+            send(ws, {type:'pseudo_taken', pseudo: newPseudo});
+          } else {
+            if (pd3) pd3.pseudo = newPseudo;
+            else players.set(ws, {pseudo:newPseudo, sessionId:msg.sessionId, room:null});
+            send(ws, {type:'pseudo_ok', pseudo: newPseudo});
+          }
+          break;
+        }
         case 'launch_now':
           handleGameAction(ws, msg);
           break;
@@ -575,7 +630,7 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   log(`Rogue Arena Server démarré sur le port ${PORT}`);
-  log(`Connecte-toi sur ws://localhost:${PORT}`);
+  loadEloData();
 });
 
 // ── Stats console ────────────────────────────────────────────────

@@ -32,35 +32,61 @@ canvas{image-rendering:pixelated;display:block}
 .screen.active{display:flex}
 
 /* ═══ TITLE ════════════════════════════════════════════════ */
-#sc-title{flex-direction:row;align-items:stretch;justify-content:center;
+#sc-title{flex-direction:column;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at 50% 35%,#160a2a 0%,#080a0f 65%);
-  padding:0;gap:0;overflow:hidden}
-.title-center{flex:0 0 320px;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;padding:20px 10px;overflow-y:auto}
-.title-side-panel{flex:1;max-width:260px;display:flex;flex-direction:column;
-  background:rgba(5,15,30,.7);border-right:1px solid #1a3050;overflow:hidden}
-#chat-panel{border-right:none;border-left:1px solid #1a3050}
-.side-panel-title{padding:10px 12px;font-size:.72em;letter-spacing:2px;
-  color:#40c8e8;border-bottom:1px solid #1a3050;flex-shrink:0}
+  padding:0;position:relative;overflow:hidden}
+.title-center{display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:20px 10px;width:340px;z-index:1}
+/* Side panels: fixed to screen edges, half-height, collapsible */
+.title-side-panel{position:absolute;top:50%;transform:translateY(-50%);
+  width:220px;max-height:60vh;display:flex;flex-direction:column;
+  background:rgba(4,12,26,.92);border:1px solid #1a3050;border-radius:8px;
+  overflow:hidden;transition:width .3s,opacity .3s;z-index:10}
+#leaderboard-panel{left:10px}
+#chat-panel{right:10px}
+.title-side-panel.collapsed{width:36px;overflow:hidden}
+.title-side-panel.collapsed .side-panel-body{display:none}
+.side-panel-toggle{position:absolute;top:8px;right:8px;background:none;border:none;
+  color:#40c8e8;cursor:pointer;font-size:.8em;padding:0;line-height:1;z-index:2}
+.side-panel-title{padding:9px 32px 9px 10px;font-size:.68em;letter-spacing:2px;
+  color:#40c8e8;border-bottom:1px solid #1a3050;flex-shrink:0;white-space:nowrap;
+  cursor:pointer;user-select:none}
+.title-side-panel.collapsed .side-panel-title{writing-mode:vertical-lr;
+  padding:10px 8px;letter-spacing:3px;font-size:.62em}
+.side-panel-body{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
 .lb-tabs{display:flex;border-bottom:1px solid #1a3050;flex-shrink:0}
-.lb-tab{flex:1;background:none;border:none;color:#607080;padding:7px;
-  font-family:inherit;font-size:.72em;cursor:pointer;letter-spacing:1px;
+.lb-tab{flex:1;background:none;border:none;color:#607080;padding:6px;
+  font-family:inherit;font-size:.68em;cursor:pointer;letter-spacing:1px;
   border-bottom:2px solid transparent;transition:all .2s}
 .lb-tab.active{color:#40c8e8;border-bottom-color:#40c8e8}
-.lb-list{flex:1;overflow-y:auto;padding:4px 0}
-.lb-entry{display:flex;align-items:center;gap:8px;padding:5px 12px;
-  font-size:.7em;border-bottom:1px solid rgba(255,255,255,.04)}
-.lb-entry.me{background:rgba(64,128,255,.1);color:#80b0ff}
-.lb-rank{color:#607080;min-width:22px;text-align:right}
+.lb-list{overflow-y:auto;max-height:calc(60vh - 80px);padding:2px 0}
+.lb-entry{display:flex;align-items:center;gap:6px;padding:4px 10px;
+  font-size:.68em;border-bottom:1px solid rgba(255,255,255,.04)}
+.lb-entry.me{background:rgba(64,128,255,.12);color:#80b0ff}
+.lb-rank{color:#607080;min-width:18px;text-align:right;font-size:.9em}
 .lb-pseudo{flex:1;color:#c0d8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lb-elo{color:#c8a840;font-weight:bold;min-width:36px;text-align:right}
-#global-chat-msgs .cm{font-size:.72em;color:#a0b8c8;word-break:break-word}
+.lb-elo{color:#c8a840;font-weight:bold;min-width:32px;text-align:right}
+#global-chat-msgs .cm{font-size:.7em;color:#a0b8c8;word-break:break-word;
+  padding:2px 0;line-height:1.4}
 #global-chat-msgs .cm b{color:#40c8e8}
-@media(max-width:700px){
-  #sc-title{flex-direction:column}
-  .title-side-panel{max-width:100%;height:180px;flex:0 0 180px}
-  #leaderboard-panel{order:-1}
-  .title-center{flex:1}
+@media(max-width:768px){
+  /* On mobile: panels are hidden by default, accessible via small edge tabs */
+  .title-side-panel{
+    width:42px!important;
+    top:50%;transform:translateY(-50%);
+  }
+  .title-side-panel:not(.collapsed){
+    width:85vw!important;max-width:300px;
+  }
+  .title-side-panel.collapsed .side-panel-body{display:none}
+  #leaderboard-panel{left:0;border-left:none;border-radius:0 8px 8px 0}
+  #chat-panel{right:0;border-right:none;border-radius:8px 0 0 8px}
+  .title-side-panel.collapsed .side-panel-title{
+    writing-mode:vertical-lr;padding:10px 8px;font-size:.58em;
+    letter-spacing:2px;overflow:hidden;text-overflow:clip;max-height:120px
+  }
+  .title-center{width:100%;max-width:340px}
+  /* Start collapsed on mobile */
 }
 #sc-title::before{content:'';position:absolute;inset:0;
   background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,255,255,.012) 3px,rgba(255,255,255,.012) 4px);
@@ -524,13 +550,16 @@ canvas{image-rendering:pixelated;display:block}
 <div class="screen active" id="sc-title">
   <!-- ── Classement gauche ──────────────────────── -->
   <div class="title-side-panel" id="leaderboard-panel">
-    <div class="side-panel-title">🏆 CLASSEMENT EN LIGNE</div>
-    <div class="lb-tabs">
-      <button class="lb-tab active" onclick="G.showLbTab('1v1',this)">1v1</button>
-      <button class="lb-tab" onclick="G.showLbTab('2v2',this)">2v2</button>
+    <div class="side-panel-title" onclick="G.togglePanel('leaderboard-panel')">🏆 CLASSEMENT EN LIGNE</div>
+    <button class="side-panel-toggle" onclick="G.togglePanel('leaderboard-panel')">◀</button>
+    <div class="side-panel-body">
+      <div class="lb-tabs">
+        <button class="lb-tab active" onclick="G.showLbTab('1v1',this)">1v1</button>
+        <button class="lb-tab" onclick="G.showLbTab('2v2',this)">2v2</button>
+      </div>
+      <div id="lb-1v1" class="lb-list"><div style="color:#405060;font-size:.68em;padding:10px;text-align:center">Connexion...</div></div>
+      <div id="lb-2v2" class="lb-list" style="display:none"><div style="color:#405060;font-size:.68em;padding:10px;text-align:center">Connexion...</div></div>
     </div>
-    <div id="lb-1v1" class="lb-list"></div>
-    <div id="lb-2v2" class="lb-list" style="display:none"></div>
   </div>
 
   <!-- ── Centre ─────────────────────────────────── -->
@@ -547,13 +576,21 @@ canvas{image-rendering:pixelated;display:block}
       <canvas id="ecu-title-icon" width="18" height="18"></canvas>
       Écus : <span id="ecu-val">0</span>
     </div>
+    <div class="elo-disp" style="font-size:.75em;color:#40c8e8">
+      ELO en ligne 1v1 : <span id="elo-online-1v1">1000</span>
+    </div>
+    <div class="elo-disp" style="font-size:.75em;color:var(--accent2)">
+      ELO en ligne 2v2 : <span id="elo-online-2v2">1000</span>
+    </div>
     <button class="mbtn" id="music-btn" onclick="G.toggleMusic()" style="font-size:10px;padding:8px 16px;margin-top:4px">🎵 MUSIQUE : ON</button>
     <div style="font-family:'VT323',monospace;font-size:12px;color:rgba(255,255,255,.25);margin-top:12px;letter-spacing:1px">All rights reserved © Nicolas Museur</div>
   </div>
 
   <!-- ── Tchat global droite ────────────────────── -->
   <div class="title-side-panel" id="chat-panel">
-    <div class="side-panel-title">💬 TCHAT GLOBAL</div>
+    <div class="side-panel-title" onclick="G.togglePanel('chat-panel')">💬 TCHAT GLOBAL</div>
+    <button class="side-panel-toggle" onclick="G.togglePanel('chat-panel')">▶</button>
+    <div class="side-panel-body">
     <!-- Pseudo input -->
     <div style="display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid #1a3a5a">
       <input id="chat-pseudo-input" maxlength="8" placeholder="Pseudo..."
@@ -575,6 +612,7 @@ canvas{image-rendering:pixelated;display:block}
         style="background:#1a3a5a;border:1px solid #2a5a8a;color:#40c8e8;
         padding:6px 10px;font-family:inherit;border-radius:4px;cursor:pointer;font-size:.8em">↑</button>
     </div>
+    </div><!-- end side-panel-body -->
   </div>
 </div>
 
@@ -3016,7 +3054,7 @@ function drawAnims(ctx){
 // GAME
 // ═══════════════════════════════════════════════════════════════
 const G={
-  elo:1200,eloTeam:1200,ecus:0,ownedSkins:[],selectedSkin:null,phase:'title',zoomScale:1.4,panX:0,panY:0,mode:'1v1',
+  elo:1000,eloTeam:1000,ecus:0,ownedSkins:[],selectedSkin:null,phase:'title',zoomScale:1.4,panX:0,panY:0,mode:'1v1',
   pb:{step:0,playerBan:null,enemyBan:null,playerPick:null,enemyPick:null,sel:null,timer:15,iv:null,banA:[],banB:[],picksA:[],picksB:[]},
   grid:[],decs:[],effects:[],units:[],turrets:[],biome:'default',biomeName:'',playerCanEndTurn:false,turnTimer:null,turnTimeLeft:0,enemyPickHistory:[],_casting:false,_moveAnims:[],
   turnOrder:[],turnIdx:0,round:1,
@@ -3780,9 +3818,10 @@ const G={
 
   confirmPB(){
     const pb=this.pb;if(!pb.sel)return;
-    if(G.mp._isOnline){
-      // Verify it's my turn before sending
-      if(!G.mp._pbState||G.mp._pbState.slot!==G.mp.mySlot)return;
+    if(G.mp&&G.mp._isOnline){
+      // Check it's my turn — _pbState.slot must match mySlot
+      const pbS=G.mp._pbState;
+      if(pbS&&pbS.slot!==G.mp.mySlot)return; // not my turn
       G.mp._send({type:'pb_action',roomId:G.mp.roomId,heroId:pb.sel,slot:G.mp.mySlot});
       const cfm=document.getElementById('cfm-btn');
       if(cfm)cfm.disabled=true;
@@ -3799,7 +3838,8 @@ const G={
     if(!pb.sel)return;
     if(G.mp&&G.mp._isOnline){
       // Online 2v2: same path as 1v1 — send to server
-      if(!G.mp._pbState||G.mp._pbState.slot!==G.mp.mySlot)return;
+      const pbS2=G.mp._pbState;
+      if(pbS2&&pbS2.slot!==G.mp.mySlot)return;
       G.mp._send({type:'pb_action',roomId:G.mp.roomId,heroId:pb.sel,slot:G.mp.mySlot});
       const cfm=document.getElementById('cfm-btn');
       if(cfm)cfm.disabled=true;
@@ -7436,13 +7476,13 @@ const G={
         setTimeout(()=>this.showScreen('res'),900);
         return true;
       }
-      // Online: my team is the team of my unit
+      // Online: determine win from my unit's team
       const _myTeamOnline=G.mp&&G.mp._isOnline&&G.mp._myUnitId
         ?G.units.find(u=>u.id===G.mp._myUnitId)?.team:'player';
       const _myTeamWon=_myTeamOnline==='player'?(aE===0):(aP===0);
       const w=G.mp&&G.mp._isOnline?_myTeamWon:(aE===0);
       const d=w?25:-20;
-      this.elo=Math.max(0,this.elo+d);
+      if(!(G.mp&&G.mp._isOnline))this.elo=Math.max(0,this.elo+d);
       if(w){
         const earned=1+Math.floor(Math.random()*3);
         this.ecus+=earned;
@@ -7450,12 +7490,17 @@ const G={
         this.log('💰 +'+earned+' écu(s) gagnés!','buff');
       }
       this.saveProgress();
-      document.getElementById('elo-val').textContent=this.elo;
       const ev=document.getElementById('ecu-val');if(ev)ev.textContent=this.ecus;
       document.getElementById('res-title').textContent=w?'VICTOIRE!':'DÉFAITE';
       document.getElementById('res-title').className='res-title '+(w?'win':'lose');
       const ecuHtml=w?'<div class="res-ecu-earned" id="res-ecu-row"></div>':'';
-      document.getElementById('res-elo').innerHTML='ELO: <span>'+(d>=0?'+':'')+d+'</span> → '+this.elo+ecuHtml;
+      if(G.mp&&G.mp._isOnline){
+        // Mode en ligne: afficher ELO delta
+        document.getElementById('res-elo').innerHTML='ELO EN LIGNE 1v1/2v2: <span>'+(d>=0?'+':'')+d+'</span>'+ecuHtml;
+      }else{
+        // Mode vs IA: afficher seulement les écus, pas d'ELO
+        document.getElementById('res-elo').innerHTML=w?(ecuHtml||''):'';
+      }
       if(w){
         // Dessiner les écus gagnés
         setTimeout(()=>{
@@ -8617,13 +8662,12 @@ G.mp = {
         break;
 
       case 'chat_history':
-        (msg.messages || []).forEach(m => G.mp._appendGlobalChat(m.pseudo, m.text, true));
-        const chatEl = document.getElementById('global-chat-msgs');
-        if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+        document.getElementById('global-chat-msgs')?.replaceChildren();
+        (msg.messages || []).forEach(m => G.mp._appendGlobalChat(m.pseudo, m.text, true, m.ts));
         break;
 
       case 'global_chat':
-        G.mp._appendGlobalChat(msg.pseudo, msg.text);
+        G.mp._appendGlobalChat(msg.pseudo, msg.text, false, msg.ts);
         break;
 
       case 'pb_action':
@@ -8663,6 +8707,11 @@ G.mp = {
 
       case 'chat': break; // chat désactivé
 
+      case 'game_over':
+        // Server confirmed game over — update ELO display and leaderboard
+        // The server already called setElo, leaderboard update will come separately
+        break;
+
       case 'turn_timeout':
         // Server forced end of turn (AFK player)
         G.log('⏱ Tour forcé (temps écoulé)', 'sys');
@@ -8676,6 +8725,17 @@ G.mp = {
             G.endTurn?.();
           }
         }
+        break;
+
+      case 'pseudo_taken':
+        G.mp._log('❌ Pseudo "'+msg.pseudo+'" déjà pris');
+        const ptErr = document.getElementById('chat-pseudo-ok') || document.getElementById('lobby-pseudo-err');
+        if (ptErr) { ptErr.textContent = '❌ Pseudo déjà utilisé'; ptErr.style.color='#e84040'; }
+        break;
+
+      case 'pseudo_ok':
+        const poEl = document.getElementById('chat-pseudo-ok');
+        if (poEl) { poEl.textContent = '✓'; poEl.style.color='#40c870'; }
         break;
 
       case 'pong':
@@ -9330,6 +9390,13 @@ G.mp = {
 
 // Pré-remplir le pseudo
 window.addEventListener('load', () => {
+  // Auto-collapse side panels on mobile
+  if (window.innerWidth <= 768) {
+    ['leaderboard-panel','chat-panel'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('collapsed')) G.togglePanel(id);
+    });
+  }
   const lobbyIn = document.getElementById('lobby-pseudo-input');
   if (lobbyIn && G.mp.pseudo) {
     lobbyIn.value = G.mp.pseudo;
@@ -9349,6 +9416,16 @@ G.showLbTab = function(mode, btn) {
   document.getElementById('lb-1v1').style.display = mode==='1v1'?'block':'none';
   document.getElementById('lb-2v2').style.display = mode==='2v2'?'block':'none';
 };
+G.togglePanel = function(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isCollapsed = el.classList.toggle('collapsed');
+  const btn = el.querySelector('.side-panel-toggle');
+  if (btn) {
+    if (id === 'leaderboard-panel') btn.textContent = isCollapsed ? '▶' : '◀';
+    else btn.textContent = isCollapsed ? '◀' : '▶';
+  }
+};
 
 G.mp._connectBackground = function() {
   if (this.ws && this.ws.readyState <= 1) return;
@@ -9363,36 +9440,50 @@ G.mp.onChatPseudoInput = function(input) {
   const clean = input.value.replace(/[^a-zA-Z0-9_\-]/g,'').slice(0,8);
   input.value = clean;
   const ok = document.getElementById('chat-pseudo-ok');
-  if (ok) ok.textContent = clean.length >= 2 ? '✓' : '';
+  if (ok) { ok.textContent = ''; ok.style.color='#40c870'; }
   if (clean.length >= 2) {
     this.pseudo = clean;
     localStorage.setItem('ra_pseudo', clean);
-    // Sync to lobby pseudo input too
     const li = document.getElementById('lobby-pseudo-input');
-    if (li && !li.value) li.value = clean;
+    if (li) li.value = clean;
+    // Check pseudo availability on server
+    if (!this.connected) this._connectBackground();
+    setTimeout(() => this._send({type:'set_pseudo', pseudo:clean, sessionId:this.sessionId}), 300);
   }
 };
 
 G.mp.sendGlobalChat = function() {
   const inp = document.getElementById('global-chat-in');
   const text = (inp?.value||'').trim();
-  if (!text || this.pseudo.length < 2) return;
-  if (!this.connected) this._connectBackground();
-  setTimeout(() => {
-    this._send({type:'global_chat', text, pseudo:this.pseudo});
+  // Get pseudo from chat input or stored
+  const chatPseudo = document.getElementById('chat-pseudo-input')?.value?.trim() || this.pseudo;
+  if (!text) { return; }
+  if (chatPseudo.length < 2) {
+    const pi = document.getElementById('chat-pseudo-input');
+    if (pi) { pi.style.borderColor='#e84040'; setTimeout(()=>pi.style.borderColor='',1500); }
+    return;
+  }
+  this.pseudo = chatPseudo;
+  localStorage.setItem('ra_pseudo', chatPseudo);
+  const doSend = () => {
+    this._send({type:'global_chat', text, pseudo: chatPseudo});
     if (inp) inp.value = '';
-  }, this.connected ? 0 : 500);
+  };
+  if (this.connected) { doSend(); }
+  else { this._connectBackground(); setTimeout(doSend, 600); }
 };
 
-G.mp._appendGlobalChat = function(pseudo, text, isHistory) {
+G.mp._appendGlobalChat = function(pseudo, text, isHistory, ts) {
   const el = document.getElementById('global-chat-msgs');
   if (!el) return;
   const d = document.createElement('div');
   d.className = 'cm';
-  d.innerHTML = `<b>${pseudo}</b>: ${text.replace(/</g,'&lt;')}`;
+  const time = ts ? new Date(ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  const isMine = pseudo === G.mp.pseudo;
+  d.innerHTML = `<span style="color:#405060;font-size:.85em">${time}</span> <b style="color:${isMine?'#70d8a0':'#40c8e8'}">${pseudo}</b>: ${String(text).replace(/</g,'&lt;')}`;
   el.appendChild(d);
   if (el.children.length > 80) el.removeChild(el.firstChild);
-  if (!isHistory) el.scrollTop = el.scrollHeight;
+  el.scrollTop = el.scrollHeight;
 };
 
 G.mp._renderLeaderboard = function(mode, players) {
@@ -9400,12 +9491,19 @@ G.mp._renderLeaderboard = function(mode, players) {
   if (!el) return;
   const myPseudo = this.pseudo;
   el.innerHTML = players.length === 0
-    ? '<div style="color:#405060;font-size:.7em;padding:12px;text-align:center">Aucune partie jouée</div>'
+    ? '<div style="color:#405060;font-size:.7em;padding:10px;text-align:center">Aucune partie en ligne</div>'
     : players.map((p,i) => `<div class="lb-entry${p.pseudo===myPseudo?' me':''}">
         <div class="lb-rank">${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)}</div>
         <div class="lb-pseudo">${p.pseudo}</div>
         <div class="lb-elo">${p.elo}</div>
       </div>`).join('');
+  // Update personal ELO display
+  const myEntry = players.find(p => p.pseudo === myPseudo);
+  if (myEntry) {
+    const elId = mode === '1v1' ? 'elo-online-1v1' : 'elo-online-2v2';
+    const el2 = document.getElementById(elId);
+    if (el2) el2.textContent = myEntry.elo;
+  }
 };
 // Aussi pré-remplir quand on revient sur l'écran lobby
 const _origShowScreen = G.showScreen.bind(G);
