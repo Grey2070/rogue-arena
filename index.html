@@ -622,12 +622,42 @@ canvas{image-rendering:pixelated;display:block}
     <h2 style="color:#c8a840">📋 CHANGELOG</h2>
     <div style="color:var(--text);line-height:1.9;text-align:left">
 
+      <div style="color:#40c8e8;font-size:.85em;margin-bottom:4px">▶ v2.3 — ELO &amp; Classement</div>
+      <div style="font-size:.78em;color:#a0b8c8;padding-left:10px;margin-bottom:12px">
+        • ELO en ligne 1v1 et 2v2 séparés (base 1000)<br>
+        • Classement top 100 en temps réel sur l'accueil<br>
+        • ELO persistant entre les redémarrages serveur<br>
+        • Victoire +25 ELO · Défaite -20 ELO<br>
+        • Écran fin de partie affiche l'ELO en ligne uniquement<br>
+        • Mode vs IA : affiche uniquement les écus gagnés
+      </div>
+
+      <div style="color:#40c8e8;font-size:.85em;margin-bottom:4px">▶ v2.2 — Tchat global</div>
+      <div style="font-size:.78em;color:#a0b8c8;padding-left:10px;margin-bottom:12px">
+        • Tchat global en temps réel sur l'écran d'accueil<br>
+        • Historique 50 derniers messages avec horodatage<br>
+        • Pastille rouge si nouveau message et tchat masqué<br>
+        • Pseudo unique vérifié côté serveur<br>
+        • Panneaux classement/tchat collapsibles (◀▶)
+      </div>
+
+      <div style="color:#40c8e8;font-size:.85em;margin-bottom:4px">▶ v2.1 — Pick &amp; Ban multijoueur</div>
+      <div style="font-size:.78em;color:#a0b8c8;padding-left:10px;margin-bottom:12px">
+        • Sélection d'équipe et d'emplacement en 2v2<br>
+        • Ordre de jeu : slot 0→1→2→3 (A1→B1→A2→B2)<br>
+        • Timer PB synchronisé par le serveur (15s/tour)<br>
+        • Héros déjà pris non sélectionnable<br>
+        • Pas d'Ombre (Assassin) : 2 PA + Paralysie 1 tour<br>
+        • Éclair Arcane (Enchanteur) : affaiblissement seul, sans paralysie
+      </div>
+
       <div style="color:#c8a840;font-size:.85em;margin-bottom:4px">▶ v2.0 — Multijoueur en ligne</div>
       <div style="font-size:.78em;color:#a0b8c8;padding-left:10px;margin-bottom:12px">
         • Modes 1v1 et 2v2 en ligne avec matchmaking<br>
         • Timer 60s — slots vides remplacés par IA<br>
+        • Synchronisation carte (seed partagée), tours et actions<br>
         • Pseudo mémorisé (2-8 caractères)<br>
-        • Bouton Changelog sur l'écran d'accueil
+        • Déconnexion : l'IA prend le relais + timeout 45s/tour
       </div>
 
       <div style="color:#c8a840;font-size:.85em;margin-bottom:4px">▶ v1.9 — Golem</div>
@@ -3704,6 +3734,8 @@ const G={
   // ── PICK/BAN ───────────────────────────────────────────────
   startPB(){
     this.mode='1v1';
+    // Reset online flags for vs IA mode
+    if(G.mp){G.mp._isOnline=false;G.mp._pbState=null;G.mp.roomId=null;}
     this.pb={step:0,playerBan:null,enemyBan:null,playerPick:null,enemyPick:null,sel:null,timer:15,iv:null,banA:[],banB:[],picksA:[],picksB:[]};
     this.showScreen('pb');this.renderPB();this.startPBTurn();
   },
@@ -3712,11 +3744,12 @@ const G={
     const pb=this.pb,step=PB_SEQ[pb.step]||{};
     const allBanned=[pb.playerBan,pb.enemyBan].filter(Boolean);
     const allPicked=[pb.playerPick,pb.enemyPick].filter(Boolean);
-    // Online: c'est ton tour si ton slot correspond à l'étape serveur
-    const isOnlinePB=G.mp&&G.mp._isOnline;
-    const isMyTurn=isOnlinePB
-      ? (G.mp._pbState&&G.mp._pbState.slot===G.mp.mySlot)
-      : (step.team==='player');
+    // Online: server controls turn via _pbState
+    // Offline: always player's turn when step.team==='player'
+    const isOnlinePB = !!(G.mp && G.mp._isOnline && G.mp.roomId);
+    const isMyTurn = isOnlinePB
+      ? (G.mp._pbState != null && G.mp._pbState.slot === G.mp.mySlot)
+      : (step.team === 'player');
     const isPlayer=step.team==='player';
     // Phase label
     if(isOnlinePB&&G.mp._pbState){
@@ -3753,12 +3786,8 @@ const G={
       const hpd=document.createElement('div');hpd.className='hpv';hpd.textContent='❤ '+h.maxHp+' PV';card.appendChild(hpd);
       card.addEventListener('click',()=>{
         if(allBanned.includes(h.id)||allPicked.includes(h.id))return;
-        if(isOnlinePB){
-          // Online: only clickable on my turn
-          if(!isMyTurn)return;
-        }else{
-          const st=PB_SEQ[pb.step];if(!st||st.team!=='player')return;
-        }
+        // Guard: can only select if it's your turn
+        if(!isMyTurn)return;
         pb.sel=h.id;this.renderPB();
       });
       grid.appendChild(card);
@@ -7496,7 +7525,8 @@ const G={
       const ecuHtml=w?'<div class="res-ecu-earned" id="res-ecu-row"></div>':'';
       if(G.mp&&G.mp._isOnline){
         // Mode en ligne: afficher ELO delta
-        document.getElementById('res-elo').innerHTML='ELO EN LIGNE 1v1/2v2: <span>'+(d>=0?'+':'')+d+'</span>'+ecuHtml;
+        const _modeLabel=G.mode==='2v2'?'ELO EN LIGNE 2v2':'ELO EN LIGNE 1v1';
+      document.getElementById('res-elo').innerHTML=_modeLabel+': <span>'+(d>=0?'+':'')+d+'</span>'+ecuHtml;
       }else{
         // Mode vs IA: afficher seulement les écus, pas d'ELO
         document.getElementById('res-elo').innerHTML=w?(ecuHtml||''):'';
@@ -7520,8 +7550,11 @@ const G={
       this.stopMusic();
       // Notify server of game result for ELO update
       if(G.mp&&G.mp._isOnline){
-        const myUnit=G.units.find(u=>u.id===G.mp._myUnitId);
-        G.mp._send({type:'game_over',winner:myUnit?.team||'player',roomId:G.mp.roomId});
+        // Only the lower-slot player sends game_over to avoid double ELO update
+        // Server deduplicates anyway but this is cleaner
+        // Winner team: the team that still has units alive
+        const winTeam = G.units.filter(u=>u.alive&&u.team==='player').length>0 ? 'player' : 'enemy';
+        G.mp._send({type:'game_over', winner:winTeam, roomId:G.mp.roomId});
       }
       setTimeout(()=>this.showScreen('res'),900);
       return true;
@@ -8018,6 +8051,8 @@ const G={
   // ── 2v2 PICK/BAN ────────────────────────────────────────────
   start2v2PB(){
     this.mode='2v2';
+    // Reset online flags for vs IA mode
+    if(G.mp){G.mp._isOnline=false;G.mp._pbState=null;G.mp.roomId=null;}
     this.pb={step:0,banA:[],banB:[],picksA:[],picksB:[],sel:null,timer:20,iv:null};
     this.showScreen('pb');
     this.renderPB2v2();
@@ -8081,10 +8116,8 @@ const G={
         if(!isPlayerTurn)return;
         if(allBanned.includes(h.id)||allPicked.includes(h.id))return;
         pb.sel=h.id;
-        // Surbrillance visuelle
         document.querySelectorAll('.hcard').forEach(cd=>cd.classList.remove('hc-sel'));
         card.classList.add('hc-sel');
-        // Activer le bouton confirmer
         const cfmEl=document.getElementById('cfm-btn');
         if(cfmEl)cfmEl.disabled=false;
       });
@@ -9123,9 +9156,15 @@ G.mp = {
       if (t <= 0) G.mp._stopPBTimer();
     }, 1000);
 
-    G.renderPB();
-    // Override cfm-btn disabled state (renderPB may re-disable it)
-    setTimeout(() => { if (cfmBtn) cfmBtn.disabled = !isMyTurn; }, 50);
+    // Call correct render based on mode
+    if (G.mode === '2v2') {
+      G.renderPB2v2(isMyTurn);
+    } else {
+      G.renderPB();
+    }
+    // Force cfm-btn state after render
+    const cfmFinal = document.getElementById('cfm-btn');
+    if (cfmFinal) cfmFinal.disabled = !isMyTurn || !G.pb?.sel;
   },
 
   _onPBChoice(msg) {
@@ -9543,6 +9582,12 @@ G.mp._renderLeaderboard = function(mode, players) {
 const _origShowScreen = G.showScreen.bind(G);
 G.showScreen = function(name) {
   _origShowScreen(name);
+  // Reset online mode when returning to title
+  if (name === 'title' && G.mp) {
+    G.mp._isOnline = false;
+    G.mp._pbState  = null;
+    G.mp.roomId    = null;  // Clear room so isOnlinePB = false in vs IA
+  }
   if (name === 'lobby') {
     const input = document.getElementById('lobby-pseudo-input');
     if (input && G.mp.pseudo && !input.value) {
