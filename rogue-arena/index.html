@@ -8835,8 +8835,7 @@ G.mp = {
     wrap.appendChild(panel);
 
     if (matchData.mode === '2v2') {
-      // En 2v2 : permettre aux joueurs de choisir leur équipe
-      G.mp._showTeamSelect(matchData, panel);
+      G.mp._show2v2SlotPicker(matchData, panel);
     } else {
       let cd = 3;
       const iv = setInterval(() => {
@@ -8852,67 +8851,72 @@ G.mp = {
     }
   },
 
-  _showTeamSelect(matchData, panel) {
-    if (panel) panel.remove();
-    const wrap = document.querySelector('#sc-lobby .lobby-wrap');
-    if (!wrap) { G.mp._launchOnlineGame(matchData); return; }
-
+  _show2v2SlotPicker(matchData, panel) {
+    // Simple 4-slot picker embedded in the match panel
+    // Slots 0,2 = 🔵 Team A | Slots 1,3 = 🔴 Team B
     G.mp._teamSelectData = matchData;
-    G.mp._selectedSlot   = null; // Which slot this client chose
+    G.mp._selectedSlot = null;
 
-    // Slots layout:
-    // A1(slot0) A2(slot2) = équipe bleue (player), tour 1 et 3
-    // B1(slot1) B2(slot3) = équipe rouge (enemy),  tour 2 et 4
-    const SLOTS = [
-      { slot:0, team:'player', label:'🔵 A1', sub:'Tour 1', color:'#4080ff', dimColor:'#2a5aaa', dimText:'#6090d0' },
-      { slot:2, team:'player', label:'🔵 A2', sub:'Tour 3', color:'#4080ff', dimColor:'#2a5aaa', dimText:'#6090d0' },
-      { slot:1, team:'enemy',  label:'🔴 B1', sub:'Tour 2', color:'#e04040', dimColor:'#aa2a2a', dimText:'#d06060' },
-      { slot:3, team:'enemy',  label:'🔴 B2', sub:'Tour 4', color:'#e04040', dimColor:'#aa2a2a', dimText:'#d06060' },
+    const SLOT_DEF = [
+      {slot:0, label:'A1', team:'player', color:'#4080ff', border:'#2a5aaa'},
+      {slot:2, label:'A2', team:'player', color:'#4080ff', border:'#2a5aaa'},
+      {slot:1, label:'B1', team:'enemy',  color:'#e04040', border:'#aa2a2a'},
+      {slot:3, label:'B2', team:'enemy',  color:'#e04040', border:'#aa2a2a'},
     ];
 
-    const sel = document.createElement('div');
-    sel.id = 'team-select-panel';
-    sel.className = 'lobby-panel';
-    sel.style.cssText = 'gap:12px;max-width:320px';
-
-    const mkSlotBtn = (s) => {
-      // Who is already in this slot?
-      const occupied = matchData.players.find(p => p.slot === s.slot && !p.isBot);
-      const isMine   = occupied && occupied.pseudo === G.mp.pseudo;
-      return `<button id="ts-slot-${s.slot}" onclick="G.mp._selectSlot(${s.slot})"
-        style="flex:1;padding:10px 6px;border:2px solid ${s.dimColor};color:${s.dimText};
-        background:rgba(0,0,0,.3);border-radius:6px;cursor:pointer;font-family:inherit;
-        font-size:.78em;min-height:72px;transition:all .2s">
-        <div style="font-size:1em;font-weight:bold">${s.label}</div>
-        <div style="font-size:.72em;opacity:.6;margin:2px 0">${s.sub}</div>
-        <div id="ts-occ-${s.slot}" style="font-size:.7em;margin-top:4px;min-height:14px;color:${s.color}">
-          ${occupied ? (isMine?'✓ Toi':'👤 '+occupied.pseudo) : '<span style="color:#405060">Libre</span>'}
-        </div>
-      </button>`;
+    const renderSlots = () => {
+      const grid = document.getElementById('slot-picker-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      SLOT_DEF.forEach(sd => {
+        const occ = matchData.players.find(p => p.slot === sd.slot);
+        const isMine = occ && !occ.isBot && occ.pseudo === G.mp.pseudo;
+        const taken  = occ && !occ.isBot && occ.pseudo !== G.mp.pseudo;
+        const btn = document.createElement('button');
+        btn.style.cssText = `flex:1;padding:10px 6px;border:2px solid ${sd.border};
+          border-radius:6px;background:${isMine?sd.color+'33':'rgba(0,0,0,.3)'};
+          color:${isMine?sd.color:taken?'#607080':sd.color};
+          font-family:inherit;font-size:.82em;cursor:${taken?'not-allowed':'pointer'};
+          display:flex;flex-direction:column;align-items:center;gap:4px;
+          transition:all .2s;min-width:70px`;
+        btn.innerHTML = `<b>${sd.label}</b><span style="font-size:.72em;opacity:.7">
+          ${occ&&!occ.isBot?occ.pseudo:(occ?'🤖 IA':'Libre')}</span>`;
+        if (!taken) btn.onclick = () => G.mp._selectSlot(sd.slot);
+        grid.appendChild(btn);
+      });
     };
 
-    sel.innerHTML = `
-      <div style="color:#40c8e8;font-size:.95em;letter-spacing:2px">⚔ CHOIX DE L'EMPLACEMENT</div>
-      <div style="color:#607080;font-size:.7em">Choisis ton équipe et ta position dans l'ordre de jeu</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%">
-        ${SLOTS.map(mkSlotBtn).join('')}
-      </div>
-      <div id="ts-info" style="color:#a0b8c8;font-size:.75em;min-height:16px"></div>
-      <div style="color:#405060;font-size:.68em">Attribution auto dans <span id="ts-cd">15</span>s</div>`;
-    wrap.appendChild(sel);
+    // Inject slot picker into panel
+    if (panel) {
+      const title = panel.querySelector('div');
+      if (title) title.textContent = '⚔ MATCH TROUVÉ — CHOISISSEZ VOTRE EMPLACEMENT';
+      const countdown = panel.querySelector('[id="match-countdown"]')?.parentElement;
+      if (countdown) countdown.remove();
+      const gridWrap = document.createElement('div');
+      gridWrap.innerHTML = `
+        <div style="font-size:.7em;color:#607080;margin-bottom:6px">
+          🔵 Équipe A (slots 1&2)&nbsp;&nbsp;&nbsp;🔴 Équipe B (slots 3&4)
+        </div>
+        <div id="slot-picker-grid" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"></div>
+        <div id="slot-cd" style="color:#405060;font-size:.68em;margin-top:6px">
+          Lancement auto dans <span id="slot-cd-num">12</span>s</div>`;
+      panel.appendChild(gridWrap);
+      renderSlots();
+    }
+    G.mp._slotRender = renderSlots;
 
-    // Timer 15s auto-assign
-    let tacd = 15;
-    G.mp._teamSelIv = setInterval(() => {
-      tacd--;
-      const el = document.getElementById('ts-cd');
-      if (el) el.textContent = tacd;
-      if (tacd <= 0) {
-        clearInterval(G.mp._teamSelIv);
+    // Auto-launch after 12s
+    let t = 12;
+    G.mp._slotTimer = setInterval(() => {
+      t--;
+      const el = document.getElementById('slot-cd-num');
+      if (el) el.textContent = t;
+      if (t <= 0) {
+        clearInterval(G.mp._slotTimer);
         if (G.mp._selectedSlot === null) {
-          // Auto: pick first available slot
+          // Auto-assign to first free slot
           const taken = matchData.players.filter(p=>!p.isBot).map(p=>p.slot);
-          const free  = [0,2,1,3].find(s => !taken.includes(s)) ?? 0;
+          const free = [0,2,1,3].find(s => !taken.includes(s)) ?? 0;
           G.mp._selectSlot(free);
         }
       }
@@ -8921,112 +8925,47 @@ G.mp = {
 
   _selectSlot(chosenSlot) {
     const matchData = G.mp._teamSelectData;
-    if (!matchData) return;
+    if (!matchData || G.mp._selectedSlot !== null) return;
 
-    const SLOTS = [
-      { slot:0, team:'player', label:'🔵 A1', color:'#4080ff', dimColor:'#2a5aaa', dimText:'#6090d0' },
-      { slot:2, team:'player', label:'🔵 A2', color:'#4080ff', dimColor:'#2a5aaa', dimText:'#6090d0' },
-      { slot:1, team:'enemy',  label:'🔴 B1', color:'#e04040', dimColor:'#aa2a2a', dimText:'#d06060' },
-      { slot:3, team:'enemy',  label:'🔴 B2', color:'#e04040', dimColor:'#aa2a2a', dimText:'#d06060' },
+    const SLOT_DEF = [
+      {slot:0,team:'player'},{slot:2,team:'player'},
+      {slot:1,team:'enemy'}, {slot:3,team:'enemy'},
     ];
-
-    const slotDef = SLOTS.find(s => s.slot === chosenSlot);
+    const slotDef = SLOT_DEF.find(s=>s.slot===chosenSlot);
     if (!slotDef) return;
-    const info = document.getElementById('ts-info');
 
-    // Check if slot is taken by someone else
-    const occupied = matchData.players.find(p => p.slot === chosenSlot && !p.isBot && p.pseudo !== G.mp.pseudo);
-    if (occupied) {
-      if (info) info.textContent = '❌ Emplacement déjà pris par ' + occupied.pseudo;
-      setTimeout(() => { if(info) info.textContent = ''; }, 2000);
-      return;
-    }
+    // Check if taken by someone else
+    const occ = matchData.players.find(p=>p.slot===chosenSlot&&!p.isBot&&p.pseudo!==G.mp.pseudo);
+    if (occ) return;
 
-    // Deselect current slot if clicking same one
-    if (G.mp._selectedSlot === chosenSlot) {
-      G.mp._selectedSlot = null;
-      // Remove from matchData
-      const me = matchData.players.find(p => p.pseudo === G.mp.pseudo);
-      if (me) { me.slot = G.mp.mySlot; me.team = null; }
-      // Reset all buttons
-      SLOTS.forEach(s => {
-        const btn = document.getElementById('ts-slot-'+s.slot);
-        if (btn) { btn.style.borderColor = s.dimColor; btn.style.color = s.dimText; }
-      });
-      if (info) info.textContent = '';
-      return;
-    }
-
-    // Select new slot
+    // Claim the slot
     G.mp._selectedSlot = chosenSlot;
-    clearInterval(G.mp._teamSelIv);
+    G.mp.mySlot = chosenSlot;
+    clearInterval(G.mp._slotTimer);
 
-    // Update matchData — reassign this player's slot and team
-    const me = matchData.players.find(p => p.pseudo === G.mp.pseudo);
+    // Update matchData
+    const me = matchData.players.find(p=>!p.isBot&&p.pseudo===G.mp.pseudo);
     if (me) { me.slot = chosenSlot; me.team = slotDef.team; }
 
-    // Update mySlot so _myUnitId will be computed correctly
-    G.mp.mySlot = chosenSlot;
+    // Tell server
+    G.mp._send({type:'slot_choice', slot:chosenSlot});
 
-    // Highlight selected, dim others
-    SLOTS.forEach(s => {
-      const btn = document.getElementById('ts-slot-'+s.slot);
-      if (!btn) return;
-      if (s.slot === chosenSlot) {
-        btn.style.borderColor = slotDef.color;
-        btn.style.color = slotDef.color;
-        btn.style.background = 'rgba('+( slotDef.team==='player'?'64,128,255':'224,64,64' )+',0.15)';
-      } else {
-        btn.style.borderColor = s.dimColor;
-        btn.style.color = s.dimText;
-        btn.style.background = 'rgba(0,0,0,.3)';
-      }
-      const occ = document.getElementById('ts-occ-'+s.slot);
-      if (occ && s.slot === chosenSlot) occ.innerHTML = `<span style="color:${slotDef.color}">✓ Toi</span>`;
-    });
+    // Refresh UI
+    if (G.mp._slotRender) G.mp._slotRender();
 
-    if (info) info.textContent = `✅ ${slotDef.label} — Lancement dans 2s...`;
-
-    // Send slot choice to server so all clients see the update
-    G.mp._send({ type: 'slot_choice', slot: chosenSlot });
-
-    // Launch after 2s
+    // Launch after 1.5s
     setTimeout(() => {
-      const panel = document.getElementById('team-select-panel');
+      const panel = document.getElementById('match-found-panel');
       if (panel) panel.remove();
       G.mp._launchOnlineGame(matchData);
-    }, 2000);
-  },
-
-  // Keep old _selectTeam for 1v1 backward compat (not called in 2v2 anymore)
-  _selectTeam(team) { G.mp._selectSlot(team === 'player' ? 0 : 1); },
-
-  _selectTeam(team, btn) {
-    if (G.mp._teamSelected) return;
-    G.mp._teamSelected = true;
-    clearInterval(G.mp._teamSelIv);
-
-    // Mettre à jour le slot du joueur local
-    const matchData = G.mp._teamSelectData;
-    if (matchData) {
-      const me = matchData.players.find(p => p.slot === G.mp.mySlot);
-      if (me) me.team = team;
-      // Réorganiser les slots : team A = slots 0,1 / team B = slots 2,3
-    }
-
-    const infoEl = document.getElementById('team-select-info');
-    if (infoEl) infoEl.textContent = `✅ Équipe ${team === 'player' ? 'A 🔵' : 'B 🔴'} choisie !`;
-
-    // Lancer après 1.5s
-    setTimeout(() => {
-      const sel = document.getElementById('team-select-panel');
-      if (sel) sel.remove();
-      G.mp._teamSelected = false;
-      G.mp._launchOnlineGame(matchData || G.mp._teamSelectData);
     }, 1500);
   },
 
-  // ── Lancer la partie en ligne ──────────────────────────────────
+  _selectTeam(team) {
+    // Legacy — redirect to slot
+    G.mp._selectSlot(team === 'player' ? 0 : 1);
+  },
+
   _launchOnlineGame(matchData) {
     G.mp.mode = matchData.mode;
     G.mode = matchData.mode;
@@ -9201,14 +9140,22 @@ G.mp = {
   },
 
   _onPBChoice(msg) {
-    // Server confirmed a choice — update pb from server arrays
     const pb = G.pb;
     if (!pb) return;
-    if (msg.bans)  { pb.playerBan  = msg.bans[0]  || null; pb.enemyBan  = msg.bans[1]  || null; }
-    if (msg.picks) { pb.playerPick = msg.picks[0] || null; pb.enemyPick = msg.picks[1] || null; }
+    // Sync bans/picks — server sends as ordered arrays (slot 0,1,2,3)
+    if (msg.bans) {
+      pb.playerBan = msg.bans[0] || null;
+      pb.enemyBan  = msg.bans[1] || null;
+      if (G.mode === '2v2') { pb.banA = msg.bans.slice(0,2).filter(Boolean); pb.banB = msg.bans.slice(2).filter(Boolean); }
+    }
+    if (msg.picks) {
+      pb.playerPick = msg.picks[0] || null;
+      pb.enemyPick  = msg.picks[1] || null;
+      if (G.mode === '2v2') { pb.picksA = [msg.picks[0],msg.picks[2]].filter(Boolean); pb.picksB = [msg.picks[1],msg.picks[3]].filter(Boolean); }
+    }
     pb.sel = null;
     G.mp._stopPBTimer();
-    G.renderPB();
+    if (G.mode === '2v2') G.renderPB2v2(false); else G.renderPB();
     const cfm = document.getElementById('cfm-btn');
     if (cfm) cfm.disabled = true;
   },
