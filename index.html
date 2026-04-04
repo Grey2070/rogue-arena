@@ -3933,11 +3933,12 @@ const G={
     // Online: order units by their online slot (J1→J2→J3→J4)
     // Offline: player first, then enemy (interleaved)
     if(G.mp._isOnline&&G.mp._gamePlayers){
-      // Sort all units by slot order
+      // Map unit id to player slot for correct ordering
+      // slotToUnitId: 0→player_0, 1→enemy_1, 2→player_1, 3→enemy_3(but actually enemy_2 in 2v2)
+      const unitSlotMap={'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
       const allUnits=[...pl,...en].sort((a,b)=>{
-        const ga=G.mp._gamePlayers.find(p=>p.team===a.team&&!p.isBot);
-        const gb=G.mp._gamePlayers.find(p=>p.team===b.team&&!p.isBot);
-        const sa=ga?.slot??99, sb=gb?.slot??99;
+        const sa=unitSlotMap[a.id]??99;
+        const sb=unitSlotMap[b.id]??99;
         return sa-sb;
       });
       allUnits.forEach(u=>{
@@ -8607,20 +8608,83 @@ G.mp = {
     if (!el) return;
     const total = mode === '1v1' ? 2 : 4;
     el.innerHTML = '';
-    for (let i = 0; i < total; i++) {
-      const p = players[i];
-      const div = document.createElement('div');
-      div.className = 'lobby-slot' + (p ? ' filled' : '');
-      const teamColor = !p ? '' : (p.team === 'player' || p.team === 'teamA' ? '#4080ff' : p.team === '?' ? '#40c8e8' : '#e04040');
-      div.innerHTML = p
-        ? `<div class="slot-icon" style="color:${teamColor}">👤</div><div style="font-size:.72em">${p.pseudo}</div>`
-        : `<div class="slot-icon">⬜</div><div style="color:#303848;font-size:.72em">Libre</div>`;
-      el.appendChild(div);
+
+    // 2v2: 4 slots arranged as 2 blue + 2 red, clickable
+    if (mode === '2v2') {
+      // Layout: slot0(A1) slot2(A2) | slot1(B1) slot3(B2)
+      // Displayed in order: 0,2,1,3
+      const SLOT_ORDER = [
+        {slot:0, team:'player', label:'A1', color:'#4080ff', border:'#2a5aaa'},
+        {slot:2, team:'player', label:'A2', color:'#4080ff', border:'#2a5aaa'},
+        {slot:1, team:'enemy',  label:'B1', color:'#e04040', border:'#aa2a2a'},
+        {slot:3, team:'enemy',  label:'B2', color:'#e04040', border:'#aa2a2a'},
+      ];
+
+      // Container with team labels
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:center';
+
+      SLOT_ORDER.forEach(sd => {
+        const occ = players.find(p => p.slot === sd.slot);
+        const isMine = occ && !occ.isBot && occ.pseudo === G.mp.pseudo;
+        const isTaken = occ && !occ.isBot && occ.pseudo !== G.mp.pseudo;
+        const isBot = occ && occ.isBot;
+
+        const btn = document.createElement('div');
+        btn.id = 'queue-slot-' + sd.slot;
+        btn.style.cssText = `
+          width:72px;padding:8px 4px;border:2px solid ${isMine ? sd.color : sd.border};
+          border-radius:8px;background:${isMine ? sd.color+'22' : 'rgba(0,0,0,.3)'};
+          color:${isMine ? sd.color : (isTaken||isBot ? '#405060' : sd.color+'99')};
+          display:flex;flex-direction:column;align-items:center;gap:3px;
+          cursor:${isTaken ? 'not-allowed' : 'pointer'};
+          transition:all .15s;font-family:inherit;text-align:center`;
+
+        const icon = isTaken||isBot ? (isBot?'🤖':'👤') : (isMine ? '✓' : '○');
+        const name = occ && !occ.isBot ? occ.pseudo : (isBot ? 'IA' : 'Libre');
+        btn.innerHTML = `
+          <div style="font-size:.8em;font-weight:bold">${sd.label}</div>
+          <div style="font-size:1.2em">${icon}</div>
+          <div style="font-size:.65em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:66px">${name}</div>`;
+
+        if (!isTaken) {
+          btn.onclick = () => G.mp._queueSelectSlot(sd.slot, sd.team);
+        }
+        wrap.appendChild(btn);
+      });
+      el.appendChild(wrap);
+    } else {
+      // 1v1: simple 2 slots
+      for (let i = 0; i < total; i++) {
+        const p = players[i];
+        const div = document.createElement('div');
+        div.className = 'lobby-slot' + (p ? ' filled' : '');
+        const teamColor = !p ? '' : (p.team === 'player' ? '#4080ff' : '#e04040');
+        div.innerHTML = p
+          ? `<div class="slot-icon" style="color:${teamColor}">👤</div><div style="font-size:.72em">${p.pseudo}</div>`
+          : `<div class="slot-icon">⬜</div><div style="color:#303848;font-size:.72em">Libre</div>`;
+        el.appendChild(div);
+      }
     }
-    // Also update the found text
+
     const foundEl = document.getElementById('lobby-players-found');
-    if (foundEl && players.length > 0)
-      foundEl.textContent = players.filter(p=>!p?.isBot).map(p=>p?.pseudo).filter(Boolean).join(', ') + ' présent(s)';
+    if (foundEl && players.filter(p=>p&&!p.isBot).length > 0)
+      foundEl.textContent = players.filter(p=>p&&!p.isBot).map(p=>p?.pseudo).filter(Boolean).join(', ') + ' présent(s)';
+  },
+
+  // Click on slot in queue (2v2)
+  _queueSelectSlot(slot, team) {
+    G.mp.mySlot = slot;
+    G.mp._pendingTeam = team;
+    // Tell server about slot preference
+    G.mp._send({ type: 'slot_preference', slot, pseudo: G.mp.pseudo });
+    // Refresh UI
+    const msg = { mode: '2v2', position: 1 };
+    // Re-render slots with updated mySlot
+    const players = G.mp._queuePlayers || [];
+    const me = players.find(p => !p.isBot && p.pseudo === G.mp.pseudo);
+    if (me) { me.slot = slot; me.team = team; }
+    G.mp._renderSlots('2v2', players);
   },
 
   // ── Quitter la file ────────────────────────────────────────────
@@ -8646,10 +8710,12 @@ G.mp = {
     switch(msg.type) {
       case 'queue_joined':
         this._showQueueUI(msg);
-        // Sync timer to server's remaining time (not always 60)
         this._startTimer(msg.timeout || 60);
         this._timerStarted = true;
-        if (msg.queuePlayers) this._renderSlots(msg.mode, msg.queuePlayers);
+        if (msg.queuePlayers) {
+          G.mp._queuePlayers = msg.queuePlayers.map((p,i) => ({...p, slot:i}));
+          this._renderSlots(msg.mode, G.mp._queuePlayers);
+        }
         break;
 
       case 'session_created':
@@ -8701,10 +8767,10 @@ G.mp = {
         this._stopTimer();
         this.roomId = msg.roomId;
         this.players = msg.players;
-        const me = msg.players.find(p => !p.isBot && p.pseudo === this.pseudo);
-        this.mySlot = me?.slot ?? 0;
+        const meFound = msg.players.find(p => !p.isBot && p.pseudo === this.pseudo);
+        this.mySlot = meFound?.slot ?? 0;
         this.isHost = (this.mySlot === 0);
-        G.mp._log('✅ Match trouvé! ' + msg.players.map(p=>p.pseudo).join(' vs '));
+        G.mp._log('✅ Match! slot=' + this.mySlot + ' ' + msg.players.map(p=>p.pseudo).join(' vs '));
         G.mp._startPickBan(msg);
         break;
 
@@ -9253,7 +9319,10 @@ G.mp = {
     } else {
       pb.picksA = [msg.picks['0']||msg.picks[0], msg.picks['2']||msg.picks[2]].filter(Boolean);
       pb.picksB = [msg.picks['1']||msg.picks[1], msg.picks['3']||msg.picks[3]].filter(Boolean);
-      G.mp._myUnitId = slotToUnitId2v2[G.mp.mySlot] || 'player_0';
+      // Find my slot from server's player list (authoritative)
+      const meFromServer = msg.players?.find(p => !p.isBot && p.pseudo === G.mp.pseudo);
+      if (meFromServer) G.mp.mySlot = meFromServer.slot;
+      G.mp._myUnitId = slotToUnitId2v2[G.mp.mySlot] ?? 'player_0';
       G.startGame2v2();
     }
   },
@@ -9355,7 +9424,12 @@ G.mp = {
     const req = msg.mode === '1v1' ? 2 : 4;
     const teamLabel = (G.mp._pendingTeam||'player')==='player'?'🔵 A':'🔴 B';
     if (modeEl) modeEl.textContent = `${msg.mode.toUpperCase()} · ${teamLabel} · ${msg.position}/${req} joueur(s)`;
-    this._renderSlots(msg.mode, [{pseudo: this.pseudo, team: G.mp._pendingTeam||'player'}]);
+    // Store queue players for slot refresh
+    G.mp._queuePlayers = msg.queuePlayers || [{pseudo: this.pseudo, team: G.mp._pendingTeam||'player', slot:0}];
+    // For 2v2: ensure current player has a slot assigned
+    const meInQ = G.mp._queuePlayers.find(p => !p.isBot && p.pseudo === G.mp.pseudo);
+    if (meInQ && G.mp.mySlot !== undefined && G.mp.mySlot !== null) meInQ.slot = G.mp.mySlot;
+    this._renderSlots(msg.mode, G.mp._queuePlayers);
     // Montrer "Lancer maintenant" si chef de groupe (position=1 = premier arrivé)
     this.isHost = (msg.position === 1);
     const launchBtn = document.getElementById('lobby-launch-now');

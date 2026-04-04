@@ -228,29 +228,66 @@ function tryMatch(mode) {
   matched.forEach(p => clearTimeout(p.botTimerRef));
 
   const room = new Room(uid(), mode);
-  matched.forEach((p, i) => {
-    // Respecter preferredTeam si possible
-    let team;
-    if (mode === '1v1') {
-      team = i === 0 ? 'player' : 'enemy';
-    } else {
-      // Tenter de respecter l'équipe préférée
-      const teamACnt = room.players.filter(p=>p.team==='player').length;
-      const teamBCnt = room.players.filter(p=>p.team==='enemy').length;
-      if (p.preferredTeam==='enemy' && teamBCnt < 2) team='enemy';
-      else if (p.preferredTeam==='player' && teamACnt < 2) team='player';
-      else team = teamACnt <= teamBCnt ? 'player' : 'enemy';
-    }
-    room.players.push({ ws: p.ws, pseudo: p.pseudo, sessionId: p.sessionId,
-      team, isBot: false, slot: i });
-    const pd = players.get(p.ws);
-    if (pd) pd.room = room.id;
-  });
+
+  if (mode === '1v1') {
+    // slot 0 = player team, slot 1 = enemy team
+    matched.forEach((p, i) => {
+      const slot = i;
+      const team = i === 0 ? 'player' : 'enemy';
+      room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
+        team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
+    });
+  } else {
+    // 2v2: assign slots respecting preferences
+    // Try to honor slot preferences, fill remaining slots in order
+    const usedSlots = new Set();
+    const assigned = new Map(); // ws → slot
+
+    // First pass: honor preferences
+    matched.forEach(p => {
+      const pref = p._slotPref;
+      if (pref !== undefined && !usedSlots.has(pref)) {
+        usedSlots.add(pref);
+        assigned.set(p.ws, pref);
+      }
+    });
+    // Second pass: fill unassigned
+    const allSlots = [0,1,2,3];
+    matched.forEach(p => {
+      if (!assigned.has(p.ws)) {
+        const free = allSlots.find(s => !usedSlots.has(s));
+        if (free !== undefined) { usedSlots.add(free); assigned.set(p.ws, free); }
+      }
+    });
+
+    matched.forEach(p => {
+      const slot = assigned.get(p.ws) ?? matched.indexOf(p);
+      const team = (slot===0||slot===2) ? 'player' : 'enemy';
+      room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
+        team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
+    });
+  }
 
   rooms.set(room.id, room);
-  log(`Room ${room.id}: match ${mode} — ${matched.map(p=>p.pseudo).join(' vs ')}`);
+  // Update pd.room for all matched players
+  room.players.forEach(p => {
+    if (p.ws) {
+      const pd = players.get(p.ws);
+      if (pd) { pd.room = room.id; pd._ip = p._ip; }
+      else players.set(p.ws, {pseudo:p.pseudo,sessionId:p.sessionId,room:room.id,_ip:p._ip||'0.0.0.0'});
+    }
+  });
+
+  // Notify all players
+  const playerList = room.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
+  room.players.filter(p=>p.ws).forEach(p => {
+    send(p.ws, {type:'match_found', roomId:room.id, mode, players:playerList});
+  });
+
+  log(`Match ${mode}: ${room.players.map(p=>p.pseudo).join(' vs ')}`);
   startRoom(room);
 }
+
 
 function startRoom(room) {
   room.state = 'pick_ban';
@@ -425,6 +462,21 @@ function handleGameAction(ws, msg) {
         startRoom(launchRoom);
         log(`Room ${launchRoom.id}: lancée manuellement`);
       }
+      break;
+    }
+    case 'slot_preference': {
+      // Player expresses preference for a slot before match starts
+      const prefSlot = msg.slot;
+      const pd_pref = players.get(ws);
+      if (pd_pref) {
+        pd_pref._slotPref = prefSlot;
+        pd_pref._teamPref = (prefSlot===0||prefSlot===2) ? 'player' : 'enemy';
+      }
+      // If in queue, update the display slot
+      ['1v1','2v2'].forEach(m2 => {
+        const qi = queues[m2].findIndex(p => p.ws === ws);
+        if (qi >= 0) queues[m2][qi]._slotPref = prefSlot;
+      });
       break;
     }
     case 'slot_choice': {
