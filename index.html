@@ -67,8 +67,8 @@ canvas{image-rendering:pixelated;display:block}
 .lb-rank{color:#607080;min-width:26px;text-align:right;font-size:1em}
 .lb-pseudo{flex:1;color:#c0d8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lb-elo{color:#c8a840;font-weight:bold;min-width:40px;text-align:right}
-#global-chat-msgs .cm{font-size:.92em;color:#a0b8c8;word-break:break-word;
-  padding:4px 0;line-height:1.55}
+#global-chat-msgs .cm{font-size:1.1em;color:#a0b8c8;word-break:break-word;
+  padding:4px 2px;line-height:1.6}
 #global-chat-msgs .cm b{color:#40c8e8}
 @media(max-width:768px){
   /* On mobile: panels are hidden by default, accessible via small edge tabs */
@@ -596,7 +596,7 @@ canvas{image-rendering:pixelated;display:block}
     <div style="display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid #1a3a5a">
       <input id="chat-pseudo-input" maxlength="8" placeholder="Pseudo..."
         style="flex:1;background:#0a1828;border:1px solid #1a4060;color:#e0f0ff;
-        padding:5px 8px;font-family:inherit;font-size:.72em;border-radius:4px;outline:none"
+        padding:6px 10px;font-family:inherit;font-size:1em;border-radius:4px;outline:none"
         oninput="G.mp.onChatPseudoInput(this)"/>
       <div id="chat-pseudo-ok" style="color:#40c870;font-size:.7em;align-self:center;min-width:14px"></div>
     </div>
@@ -607,7 +607,7 @@ canvas{image-rendering:pixelated;display:block}
     <div style="display:flex;gap:6px;padding:6px 8px;border-top:1px solid #1a3a5a">
       <input id="global-chat-in" placeholder="Message..." maxlength="120"
         style="flex:1;background:#0a1828;border:1px solid #1a4060;color:#e0f0ff;
-        padding:6px 8px;font-family:inherit;font-size:.75em;border-radius:4px;outline:none"
+        padding:7px 10px;font-family:inherit;font-size:1em;border-radius:4px;outline:none"
         onkeydown="if(event.key==='Enter')G.mp.sendGlobalChat()"/>
       <button onclick="G.mp.sendGlobalChat()"
         style="background:#1a3a5a;border:1px solid #2a5a8a;color:#40c8e8;
@@ -6594,26 +6594,37 @@ const G={
         this.renderUnitList('ally-list',this.units.filter(u=>u.team==='player'));
         this.renderUnitList('enemy-list',this.units.filter(u=>u.team==='enemy'));
       }
-      // Online: handle turn routing
+      // Online: route turn to correct client
       if(G.mp&&G.mp._isOnline){
-        const isMyMainUnit = (u.id===G.mp._myUnitId);
-        // Servants/clones: run AI if the owner is my unit
+        const myId = G.mp._myUnitId;
+        const isMyMainUnit = (u.id===myId);
         const isMyServant = (u.isServant||u.isClone) &&
-          (u.servantOwner===G.mp._myUnitId||u.cloneOwner===G.mp._myUnitId);
-        // Turrets: run AI if owned by my unit
-        const isMyTurret = u._isTurret && u.owner===G.mp._myUnitId;
+          (u.servantOwner===myId||u.cloneOwner===myId);
+        const isMyTurret = u._isTurret && u.owner===myId;
         const isMyEntity = isMyMainUnit||isMyServant||isMyTurret;
         if(!isMyEntity){
+          // Check if it's a bot unit (AI should run locally for bots)
+          const ownerSlot = G.mp._gamePlayers?.find(p=>
+            p.pseudo===u.heroId||(u.isServant&&p.slot===0)
+          );
+          // Is this unit owned by a bot player?
+          const unitTeam = u.team;
+          const humanOnTeam = G.mp._gamePlayers?.find(p=>!p.isBot&&p.team===unitTeam&&
+            (G.mode!=='2v2'||p.pseudo!==G.mp.pseudo));
+          // If no human on this team (bots only) or _botFallback: run AI
+          if(u._botFallback){
+            setTimeout(()=>this.runAI(u),800);
+            return;
+          }
           this.log('⏳ Tour de '+u.name+'...','sys');
-          if(u._botFallback){setTimeout(()=>this.runAI(u),800);return;}
           return;
         }
-        // My entity (servant/clone/turret) → run AI locally
         if(!isMyMainUnit){
+          // My servant/turret/clone → AI runs locally
           setTimeout(()=>this.runAI(u),400);
           return;
         }
-        // My main unit → human turn (falls through to isHumanTurn below)
+        // My main unit → falls through to isHumanTurn
       }
       const delay=this.mode==='2v2'?1200:500;
       setTimeout(()=>this.runAI(u),delay);
@@ -7480,15 +7491,19 @@ const G={
     if(!_nxtIsUnit||(this.turnIdx+1>=this.turnOrder.length))this.tickGroundFx();
     setTimeout(()=>{
       if(this.checkWin())return;
-      // Online: broadcast end_turn for servant/clone/turret owned by me
+      // Online: servant/clone/turret owned by me → send end_turn, don't advance locally
       if(G.mp&&G.mp._isOnline){
         const isMyServant=(unit.isServant||unit.isClone)&&
           (unit.servantOwner===G.mp._myUnitId||unit.cloneOwner===G.mp._myUnitId);
         const isMyTurret=unit._isTurret&&unit.owner===G.mp._myUnitId;
         if(isMyServant||isMyTurret){
           G.mp.sendAction({type:'end_turn'});
-          return; // server will broadcast end_turn back to advance both clients
+          return; // _applyRemoteAction will advance turnIdx on ALL clients
         }
+        // Opponent's servant/turret: already advanced via _applyRemoteAction, don't double-advance
+        const isOpponent = (unit.isServant||unit.isClone||unit._isTurret) &&
+          !((unit.servantOwner||unit.cloneOwner||unit.owner)===G.mp._myUnitId);
+        if(isOpponent) return;
       }
       this.turnIdx++;
       this.startNewTurn();
@@ -8922,7 +8937,18 @@ G.mp = {
     wrap.appendChild(panel);
 
     if (matchData.mode === '2v2') {
-      G.mp._show2v2SlotPicker(matchData, panel);
+      // Slots already chosen during queue — just launch after countdown
+      let cd = 3;
+      const iv2v2 = setInterval(() => {
+        cd--;
+        const el = document.getElementById('match-countdown');
+        if (el) el.textContent = cd;
+        if (cd <= 0) {
+          clearInterval(iv2v2);
+          panel.remove();
+          G.mp._launchOnlineGame(matchData);
+        }
+      }, 1000);
     } else {
       let cd = 3;
       const iv = setInterval(() => {
