@@ -39,7 +39,7 @@ canvas{image-rendering:pixelated;display:block}
   justify-content:center;padding:20px 10px;width:340px;z-index:1}
 /* Side panels: fixed to screen edges, half-height, collapsible */
 .title-side-panel{position:absolute;top:50%;transform:translateY(-50%);
-  width:220px;max-height:60vh;display:flex;flex-direction:column;
+  width:275px;max-height:70vh;display:flex;flex-direction:column;
   background:rgba(4,12,26,.92);border:1px solid #1a3050;border-radius:8px;
   overflow:hidden;transition:width .3s,opacity .3s;z-index:10}
 #leaderboard-panel{left:10px}
@@ -59,7 +59,7 @@ canvas{image-rendering:pixelated;display:block}
   font-family:inherit;font-size:.68em;cursor:pointer;letter-spacing:1px;
   border-bottom:2px solid transparent;transition:all .2s}
 .lb-tab.active{color:#40c8e8;border-bottom-color:#40c8e8}
-.lb-list{overflow-y:auto;max-height:calc(60vh - 80px);padding:2px 0}
+.lb-list{overflow-y:auto;max-height:calc(70vh - 80px);padding:2px 0}
 .lb-entry{display:flex;align-items:center;gap:6px;padding:4px 10px;
   font-size:.68em;border-bottom:1px solid rgba(255,255,255,.04)}
 .lb-entry.me{background:rgba(64,128,255,.12);color:#80b0ff}
@@ -1070,7 +1070,7 @@ const HEROES=[
     {id:'backstab',name:'Coup dans le Dos',desc:'3 dégâts mêlée.',cost:1,range:1,dmg:3,tags:['bleed'],effect:'backstab'},
     {id:'poison_blade',name:'Lame Empoisonnée',desc:'2 dégâts + Poison 3 tours.',cost:1,range:1,dmg:2,tags:['poison'],effect:'poison'},
     {id:'smoke',name:'Bombe Fumigène',desc:'Nuage: bloque LDV.',cost:1,range:3,dmg:0,tags:['curse'],effect:'smoke',placement:true},
-    {id:'shadowstep',name:'PAS D\'OMBRE',desc:'ULTIME: Téléport + 6 dégâts.',cost:3,range:5,dmg:6,tags:['poison','bleed'],ultimate:true,effect:'shadow_poison',ignoresLOS:true,cd:4}
+    {id:'shadowstep',name:'PAS D\'OMBRE',desc:'2PA · Téléport + 6 dégâts + Paralysie 1 tour.',cost:2,range:5,dmg:6,tags:['poison','bleed'],ultimate:true,effect:'shadow_poison',ignoresLOS:true,cd:4}
   ]},
   {id:'paladin',name:'Paladin',role:'Tank/Soin',color:'#e8c84a',sprite:'paladin',maxHp:30,skills:[
     {id:'smite',name:'Châtiment',desc:'2 dégâts + cleanse allié adj.',cost:1,range:1,dmg:2,tags:['heal','sacred']},
@@ -6115,7 +6115,7 @@ const G={
       return;
     }
     if(ef==='blink'){if(this.grid[ty][tx]===0&&!this.getUnitAt(tx,ty)){caster.x=tx;caster.y=ty;this.log(caster.name+' téléporte!','buff');this.updateHighlights();}return;}
-    if(ef==='shadow_poison'){const t=this.getUnitAt(tx,ty)||this.getTurrAt(tx,ty,caster.team);if(t){for(const d of[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}]){const nx=t.x+d.x,ny=t.y+d.y;if(inGrid(nx,ny)&&this.grid[ny][nx]===0&&!this.getUnitAt(nx,ny)){caster.x=nx;caster.y=ny;break;}}this.doDmg(t,sk.dmg,sk.tags,caster);}return;}
+    if(ef==='shadow_poison'){const t=this.getUnitAt(tx,ty)||this.getTurrAt(tx,ty,caster.team);if(t){for(const d of[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}]){const nx=t.x+d.x,ny=t.y+d.y;if(inGrid(nx,ny)&&this.grid[ny][nx]===0&&!this.getUnitAt(nx,ny)){caster.x=nx;caster.y=ny;break;}}this.doDmg(t,sk.dmg,sk.tags,caster);this.applyFx(t,'stun',1);this.log("💀 PAS D'OMBRE! Paralysie!","crit");spawnParticles(tx,ty,5,{color:'#a020f0',type:'spark',vy:2,decay:0.05,size:2.5});}return;}
     if(sk.id==='smite'){const t=this.getUnitAt(tx,ty)||this.getTurrAt(tx,ty,caster.team);if(t&&t.team!==caster.team)this.doDmg(t,sk.dmg,sk.tags,caster);for(const d of[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}]){const adj=this.getUnitAt(caster.x+d.x,caster.y+d.y);if(adj&&adj.team===caster.team){const neg=['burn','poison','slow','freeze','weaken','silence'];const i=adj.statusEffects.findIndex(s=>neg.includes(s.type));if(i>=0){this.log('Cleanse '+adj.name+'!','buff');adj.statusEffects.splice(i,1);}break;}}return;}
     if(sk.aoe){
       // Vérifier LDV vers le centre AoE
@@ -9425,6 +9425,11 @@ G.togglePanel = function(id) {
     if (id === 'leaderboard-panel') btn.textContent = isCollapsed ? '▶' : '◀';
     else btn.textContent = isCollapsed ? '◀' : '▶';
   }
+  // Clear badge when opening chat
+  if (id === 'chat-panel' && !isCollapsed) {
+    const badge = document.getElementById('chat-badge');
+    if (badge) badge.style.display = 'none';
+  }
 };
 
 G.mp._connectBackground = function() {
@@ -9455,22 +9460,32 @@ G.mp.onChatPseudoInput = function(input) {
 G.mp.sendGlobalChat = function() {
   const inp = document.getElementById('global-chat-in');
   const text = (inp?.value||'').trim();
-  // Get pseudo from chat input or stored
-  const chatPseudo = document.getElementById('chat-pseudo-input')?.value?.trim() || this.pseudo;
-  if (!text) { return; }
+  const chatPseudo = (document.getElementById('chat-pseudo-input')?.value||this.pseudo||'').trim().replace(/[^a-zA-Z0-9_-]/g,'').slice(0,8);
+  if (!text) return;
   if (chatPseudo.length < 2) {
     const pi = document.getElementById('chat-pseudo-input');
-    if (pi) { pi.style.borderColor='#e84040'; setTimeout(()=>pi.style.borderColor='',1500); }
+    if (pi) { pi.style.borderColor='#e84040'; pi.focus(); setTimeout(()=>pi.style.borderColor='',2000); }
+    const ok=document.getElementById('chat-pseudo-ok');
+    if(ok){ok.textContent='⚠ Pseudo requis';ok.style.color='#e84040';}
     return;
   }
   this.pseudo = chatPseudo;
   localStorage.setItem('ra_pseudo', chatPseudo);
-  const doSend = () => {
-    this._send({type:'global_chat', text, pseudo: chatPseudo});
-    if (inp) inp.value = '';
-  };
-  if (this.connected) { doSend(); }
-  else { this._connectBackground(); setTimeout(doSend, 600); }
+  if (inp) inp.value = '';
+  const msg = {type:'global_chat', text, pseudo: chatPseudo};
+  if (this.ws?.readyState === WebSocket.OPEN) {
+    this._send(msg);
+  } else {
+    // Connect and send
+    this._connectBackground();
+    const waitSend = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        clearInterval(waitSend);
+        this._send(msg);
+      }
+    }, 100);
+    setTimeout(() => clearInterval(waitSend), 3000);
+  }
 };
 
 G.mp._appendGlobalChat = function(pseudo, text, isHistory, ts) {
@@ -9484,6 +9499,25 @@ G.mp._appendGlobalChat = function(pseudo, text, isHistory, ts) {
   el.appendChild(d);
   if (el.children.length > 80) el.removeChild(el.firstChild);
   el.scrollTop = el.scrollHeight;
+  // Show red badge if chat panel is collapsed and message is not from history
+  if (!isHistory) {
+    const panel = document.getElementById('chat-panel');
+    if (panel?.classList.contains('collapsed')) {
+      let badge = document.getElementById('chat-badge');
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'chat-badge';
+        badge.style.cssText = 'position:absolute;top:6px;left:6px;width:10px;height:10px;' +
+          'background:#e84040;border-radius:50%;z-index:20;pointer-events:none';
+        panel.appendChild(badge);
+      }
+      badge.style.display = 'block';
+      const cnt = parseInt(badge.dataset.count||'0')+1;
+      badge.dataset.count = cnt;
+      if (cnt > 1) badge.style.cssText += ';width:16px;height:16px;font-size:9px;' +
+        'display:flex;align-items:center;justify-content:center;color:#fff;font-family:monospace';
+    }
+  }
 };
 
 G.mp._renderLeaderboard = function(mode, players) {
