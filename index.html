@@ -3945,10 +3945,10 @@ const G={
     // Offline: player first, then enemy (interleaved)
     if(G.mp._isOnline&&G.mp._gamePlayers){
       // Main units sorted by slot
-      // unitSlotMap: unit id → player slot that controls it
-      // Slot order: 0(player_0) → 1(enemy_2) → 2(player_1) → 3(enemy_3)
-      // enemy_2 is controlled by slot-1 player, enemy_3 by slot-3 player
-      const unitSlotMap={'player_0':0,'enemy_2':1,'player_1':2,'enemy_3':3};
+      // unitSlotMap: unit id → player slot (covers 1v1 and 2v2)
+      // 1v1: player_0→slot0, enemy_1→slot1
+      // 2v2: player_0→slot0, enemy_2→slot1, player_1→slot2, enemy_3→slot3
+      const unitSlotMap={'player_0':0,'enemy_1':1,'enemy_2':1,'player_1':2,'enemy_3':3};
       const mainUnits=[...pl,...en].filter(u=>!u.isServant&&!u.isClone);
       mainUnits.sort((a,b)=>(unitSlotMap[a.id]??98)-(unitSlotMap[b.id]??98));
       mainUnits.forEach(u=>{
@@ -6673,25 +6673,36 @@ const G={
           setTimeout(()=>this.runAI(u),400);
           return;
         } else {
-          // Not my unit — find who owns it
-          // unitSlotMap: unit id → player slot that controls it
-      // Slot order: 0(player_0) → 1(enemy_2) → 2(player_1) → 3(enemy_3)
-      // enemy_2 is controlled by slot-1 player, enemy_3 by slot-3 player
-      const unitSlotMap={'player_0':0,'enemy_2':1,'player_1':2,'enemy_3':3};
-          // For servants/clones/turrets, owner = servantOwner/cloneOwner/owner
-          const ownerId = u.servantOwner||u.cloneOwner||u.owner||u.id;
-          const ownerSlot = unitSlotMap[ownerId]??unitSlotMap[u.id]??-1;
-          const ownerPlayer = G.mp._gamePlayers?.find(p=>p.slot===ownerSlot);
-          const isOwnedByBot = ownerPlayer?.isBot || u._botFallback || ownerSlot===-1;
-          if(isOwnedByBot){
+          // Not my unit — determine if it's a bot or human opponent
+          // Use _gamePlayers to find which slot controls this unit
+          const gp = G.mp._gamePlayers||[];
+          // Build dynamic slot map from game players
+          // slot 0 → player_0, slot 1 → enemy_1 (1v1) or enemy_2 (2v2)
+          // slot 2 → player_1 (2v2 only), slot 3 → enemy_3 (2v2 only)
+          const humanSlots = new Set(gp.filter(p=>!p.isBot).map(p=>p.slot));
+          // Find which slot this unit belongs to
+          const baseId = u.servantOwner||u.cloneOwner||u.owner||u.id;
+          // Map unit id to slot: player_N → slot based on index N
+          // player_0→0, player_1→2, enemy_1→1, enemy_2→1(2v2), enemy_3→3
+          const _slotOfUnit = (uid) => {
+            if(uid==='player_0') return 0;
+            if(uid==='player_1') return 2;
+            if(uid==='enemy_1')  return 1; // 1v1
+            if(uid==='enemy_2')  return 1; // 2v2 slot-1
+            if(uid==='enemy_3')  return 3; // 2v2 slot-3
+            return -1;
+          };
+          const ownerSlot = _slotOfUnit(baseId);
+          const isBot = !humanSlots.has(ownerSlot) || u._botFallback;
+          if(isBot){
             if(G.mp.mySlot===0){
-              // Host runs AI for all bot-owned units
+              // Host runs AI for all bot units
               setTimeout(()=>this.runAI(u),600);
             } else {
               this.log('⏳ Tour de '+u.name+'...','sys');
             }
           } else {
-            // Owned by a human opponent → wait for their broadcast
+            // Human opponent — wait for their broadcast
             this.log('⏳ Tour de '+u.name+'...','sys');
           }
           return;
