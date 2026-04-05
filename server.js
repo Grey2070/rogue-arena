@@ -143,10 +143,12 @@ class Room {
     this.slots = mode === '1v1' ? 2 : 4;
     this.players = [];          // [{ws, pseudo, team, isBot}]
     this.state = 'waiting';     // waiting | pick_ban | playing | finished
-    this.gameState = null;      // snapshot de l'état de jeu côté serveur
-    this.currentTurn = null;    // playerId dont c'est le tour
+    this.gameState = null;
+    this.currentTurn = null;
     this.botTimer = null;
     this.created = Date.now();
+    this.actionLog = [];        // Last 200 game actions for catch-up on reconnect
+    this._hadRealOpponent = false; // ELO: was there a real opponent at game start?
   }
 
   broadcast(msg, excludeWs = null) {
@@ -437,6 +439,8 @@ function startPBStep(room) {
     const picks = room.pbPicks;  // {0: heroId, 1: heroId, ...}
     const bans  = room.pbBans;
     const mapSeed = Math.floor(Math.random() * 2147483647);
+    // Mark that this game had real opponents (for ELO on disconnect)
+    room._hadRealOpponent = hasRealOpponent(room);
     room.broadcastAll({
       type: 'game_start',
       picks,
@@ -652,9 +656,11 @@ function handleGameAction(ws, msg) {
     }
 
     case 'game_action': {
-      // Broadcast to all other players
-      // For end_turn: broadcast to ALL (including sender) so everyone advances together
-      // For move/skill: broadcast to all EXCEPT sender (sender already applied it)
+      // Log action for catch-up (keep last 200)
+      if (msg.action) {
+        room.actionLog.push({ ...msg.action, ts: Date.now(), senderSlot: sender.slot });
+        if (room.actionLog.length > 200) room.actionLog.shift();
+      }
       const isEndTurn = msg.action?.type === 'end_turn';
       if (isEndTurn) {
         room.broadcastAll({
@@ -677,7 +683,8 @@ function handleGameAction(ws, msg) {
         room.turnStartedAt = Date.now();
         room.turnDuration  = 30; // seconds
         // Broadcast turn start with sync timestamp
-        room.broadcastAll({ type: 'turn_sync', timeLeft: room.turnDuration, ts: Date.now() });
+        room._serverTurnIdx = (room._serverTurnIdx || 0) + 1;
+        room.broadcastAll({ type: 'turn_sync', timeLeft: room.turnDuration, ts: Date.now(), turnIdx: room._serverTurnIdx });
         // Timeout if player AFK
         room.turnTimer = setTimeout(() => {
           if (room.state !== 'playing') return;
@@ -695,14 +702,30 @@ function handleGameAction(ws, msg) {
 
     case 'chat': break; // chat in-game désactivé
 
+    case 'request_sync': {
+      // Client requests full action log to recover from freeze
+      if (!room || room.state !== 'playing') break;
+      const since = msg.since || 0; // timestamp of last action client received
+      const missed = room.actionLog.filter(a => a.ts > since);
+      send(ws, {
+        type: 'sync_catch_up',
+        actions: missed,
+        turnIdx: room._serverTurnIdx || 0,
+        ts: Date.now()
+      });
+      log(`Sync: sent ${missed.length} missed actions to ${sender.pseudo}`);
+      break;
+    }
+
     case 'game_over':
       // Deduplicate + only update ELO if there's a real opponent
       if (room._eloUpdated) { break; }
-      if (!hasRealOpponent(room)) {
-        log(`Room ${room.id}: no real opponent — ELO skipped`);
+      if (!room._hadRealOpponent && !hasRealOpponent(room)) {
+        log(`Room ${room.id}: no real opponent (disconnected) — ELO skipped`);
         room.state = 'finished';
         room.broadcastAll({ type: 'game_over', winner: msg.winner });
-        setTimeout(() => rooms.delete(room.id), 30000);
+        room.actionLog = []; // Free memory
+      setTimeout(() => rooms.delete(room.id), 30000);
         break;
       }
       room._eloUpdated = true;
