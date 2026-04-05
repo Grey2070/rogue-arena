@@ -169,14 +169,15 @@ canvas{image-rendering:pixelated;display:block}
 }
 
 /* ═══ GAME SCREEN — PC ══════════════════════════════════════ */
-#sc-game{flex-direction:row;overflow:hidden;position:relative;height:100vh;max-height:100vh}
+#sc-game{flex-direction:row;overflow:hidden;position:relative;height:100svh;height:100vh;max-height:100svh;max-height:100vh}
 
 /* Left/Right panels — PC */
 .l-panel,.r-panel{background:var(--panel);display:flex;flex-direction:column;
-  padding:8px;gap:5px;overflow:hidden;flex-shrink:0;position:relative;z-index:10;
-  height:100vh;max-height:100vh;box-sizing:border-box}
+  padding:8px 8px 0 8px;gap:5px;overflow:hidden;flex-shrink:0;position:relative;z-index:10;
+  height:100svh;height:100vh;max-height:100svh;max-height:100vh;box-sizing:border-box}
 .l-panel{width:clamp(150px,16vw,200px);border-right:2px solid var(--border);
-  height:100vh;max-height:100vh;overflow-y:auto;box-sizing:border-box;flex-shrink:0}
+  height:100svh;height:100vh;max-height:100svh;max-height:100vh;
+  overflow-y:auto;box-sizing:border-box;flex-shrink:0}
 .r-panel{width:clamp(170px,18vw,215px);border-left:2px solid var(--border)}
 .ptitle{font-family:'Press Start 2P',monospace;font-size:clamp(5px,1.2vw,7px);color:var(--dim);
   letter-spacing:2px;padding-bottom:4px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -284,8 +285,7 @@ canvas{image-rendering:pixelated;display:block}
 
 .etbtn{font-family:'Press Start 2P',monospace;font-size:clamp(7px,1.5vw,8px);
   background:transparent;border:2px solid var(--accent);color:var(--accent);
-  padding:10px 8px;cursor:pointer;transition:all .15s;margin-top:auto;flex-shrink:0;
-  position:sticky;bottom:0;z-index:5}
+  padding:10px 8px;cursor:pointer;transition:all .15s;margin-top:auto;flex-shrink:0}
 .etbtn:hover,.etbtn:active{background:var(--accent);color:var(--bg)}
 .etbtn:disabled{opacity:.35;cursor:not-allowed}
 
@@ -299,7 +299,7 @@ canvas{image-rendering:pixelated;display:block}
   #ap-lbl{display:none} /* shown in drawer instead */
 
   /* Map takes remaining space above bottom bar */
-  #map-wrap{flex:1;min-height:0;overflow:hidden;max-height:calc(100vh - 160px)}
+  #map-wrap{flex:1;min-height:0;overflow:hidden}
   #gc{cursor:crosshair}
 
   /* Compact battle log */
@@ -359,8 +359,10 @@ canvas{image-rendering:pixelated;display:block}
 
   /* Mobile end turn button */
   .mob-et{font-family:'Press Start 2P',monospace;font-size:8px;
-    background:transparent;border:none;border-top:1px solid var(--border);
-    color:var(--accent);padding:8px;cursor:pointer;width:100%;text-align:center;flex-shrink:0}
+    background:var(--panel);border:none;border-top:2px solid var(--accent);
+    color:var(--accent);padding:10px;cursor:pointer;width:100%;text-align:center;
+    flex-shrink:0;position:relative;z-index:20;
+    padding-bottom:max(10px,env(safe-area-inset-bottom))}
   .mob-et:active{background:var(--accent);color:var(--bg)}
   .mob-et:disabled{opacity:.35;cursor:not-allowed}
 
@@ -3756,8 +3758,8 @@ const G={
 
   renderPB(){
     const pb=this.pb,step=PB_SEQ[pb.step]||{};
-    const allBanned=[pb.playerBan,pb.enemyBan].filter(Boolean);
-    const allPicked=[pb.playerPick,pb.enemyPick].filter(Boolean);
+    const allBanned=pb._allBanned||[pb.playerBan,pb.enemyBan].filter(Boolean);
+    const allPicked=pb._allPicked||[pb.playerPick,pb.enemyPick].filter(Boolean);
     // Online: server controls turn via _pbState
     // Offline: always player's turn when step.team==='player'
     const isOnlinePB = !!(G.mp && G.mp._isOnline && G.mp.roomId);
@@ -8118,8 +8120,8 @@ const G={
   renderPB2v2(isPlayerTurn=false){
     const pb=this.pb;
     const step=PB_SEQ_2V2[pb.step]||{};
-    const allBanned=[...pb.banA,...pb.banB];
-    const allPicked=[...pb.picksA,...pb.picksB];
+    const allBanned=pb._allBanned||[...(pb.banA||[]),...(pb.banB||[])];
+    const allPicked=pb._allPicked||[...(pb.picksA||[]),...(pb.picksB||[])];
     const isA=step.team==='teamA';
     document.getElementById('pb-phase').textContent=(step.type==='ban'?'BAN':'PICK')+' — '+(isA?'ÉQUIPE A 🔵':'ÉQUIPE B 🔴');
     document.getElementById('pb-hint').textContent='IA — sélection automatique...';
@@ -9154,6 +9156,26 @@ G.mp = {
     this._send({ type: 'game_action', roomId: this.roomId, action });
   },
 
+  // Sync pb state from server's slot-keyed objects
+  _syncPBState(pb, bans, picks) {
+    if (!pb) return;
+    const B = bans  || {};
+    const P = picks || {};
+    // 1v1: slot 0 = player, slot 1 = enemy
+    pb.playerBan  = B[0] || B['0'] || null;
+    pb.enemyBan   = B[1] || B['1'] || null;
+    pb.playerPick = P[0] || P['0'] || null;
+    pb.enemyPick  = P[1] || P['1'] || null;
+    // 2v2: slot 0+2 = team A, slot 1+3 = team B
+    pb.banA   = [B[0]||B['0'], B[2]||B['2']].filter(Boolean);
+    pb.banB   = [B[1]||B['1'], B[3]||B['3']].filter(Boolean);
+    pb.picksA = [P[0]||P['0'], P[2]||P['2']].filter(Boolean);
+    pb.picksB = [P[1]||P['1'], P[3]||P['3']].filter(Boolean);
+    // allBanned/allPicked for hero grid greying
+    pb._allBanned = Object.values(B).filter(Boolean);
+    pb._allPicked = Object.values(P).filter(Boolean);
+  },
+
   // Helper: find which player slot owns a given unit
   _unitOwnerSlot(u) {
     if (!u || !G.mp._gamePlayers) return -1;
@@ -9313,17 +9335,8 @@ G.mp = {
   _onPBChoice(msg) {
     const pb = G.pb;
     if (!pb) return;
-    // Sync bans/picks — server sends as ordered arrays (slot 0,1,2,3)
-    if (msg.bans) {
-      pb.playerBan = msg.bans[0] || null;
-      pb.enemyBan  = msg.bans[1] || null;
-      if (G.mode === '2v2') { pb.banA = msg.bans.slice(0,2).filter(Boolean); pb.banB = msg.bans.slice(2).filter(Boolean); }
-    }
-    if (msg.picks) {
-      pb.playerPick = msg.picks[0] || null;
-      pb.enemyPick  = msg.picks[1] || null;
-      if (G.mode === '2v2') { pb.picksA = [msg.picks[0],msg.picks[2]].filter(Boolean); pb.picksB = [msg.picks[1],msg.picks[3]].filter(Boolean); }
-    }
+    // bans/picks are objects keyed by slot: {0:'ninja', 1:'shaman', ...}
+    G.mp._syncPBState(pb, msg.bans, msg.picks);
     pb.sel = null;
     G.mp._stopPBTimer();
     if (G.mode === '2v2') G.renderPB2v2(false); else G.renderPB();
