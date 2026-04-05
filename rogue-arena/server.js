@@ -245,8 +245,22 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
 
 function tryMatch(mode) {
   const queue = queues[mode];
-  const minRequired = mode === '1v1' ? 2 : 2; // 2v2 needs only 2 humans (bots fill rest)
+  const minRequired = 2; // Both modes need at least 2 players
   if (queue.length < minRequired) return;
+  if (mode === '1v1' && queue.length < 2) return;
+
+  // For 2v2: wait a short window for more players (unless 4 already present)
+  if (mode === '2v2' && queue.length < 4) {
+    // Schedule a delayed match if not enough players yet
+    if (!queues._2v2MatchTimer) {
+      queues._2v2MatchTimer = setTimeout(() => {
+        queues._2v2MatchTimer = null;
+        if (queues['2v2'].length >= 2) tryMatch('2v2');
+      }, 8000); // Wait 8s for more players
+    }
+    return; // Don't match immediately with only 2 players
+  }
+  if (mode === '2v2') delete queues._2v2MatchTimer;
 
   // For 2v2: take up to 4, fill rest with bots
   const takeCount = mode === '2v2' ? Math.min(queue.length, 4) : 2;
@@ -389,8 +403,10 @@ function startPBStep(room) {
   const picked = room.pbPicks;
   const curSlot = step.slot ?? (step.team === 'player' ? 0 : 1);
   // Find pseudo of player whose turn it is
-  const turnPlayer = room.players.find(p => p.slot === curSlot);
-  const turnPseudo = turnPlayer ? turnPlayer.pseudo : step.team;
+  const turnPlayer = getPlayerBySlot(room, curSlot);
+  const turnPseudo = turnPlayer
+    ? (turnPlayer.isBot ? `IA (${step.type==='ban'?'Ban':'Pick'})` : turnPlayer.pseudo)
+    : step.team;
   room.broadcastAll({
     type: 'pb_turn',
     step: room.pbStep,

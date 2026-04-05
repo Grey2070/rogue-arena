@@ -3945,7 +3945,10 @@ const G={
     // Offline: player first, then enemy (interleaved)
     if(G.mp._isOnline&&G.mp._gamePlayers){
       // Main units sorted by slot
-      const unitSlotMap={'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
+      // unitSlotMap: unit id → player slot that controls it
+      // Slot order: 0(player_0) → 1(enemy_2) → 2(player_1) → 3(enemy_3)
+      // enemy_2 is controlled by slot-1 player, enemy_3 by slot-3 player
+      const unitSlotMap={'player_0':0,'enemy_2':1,'player_1':2,'enemy_3':3};
       const mainUnits=[...pl,...en].filter(u=>!u.isServant&&!u.isClone);
       mainUnits.sort((a,b)=>(unitSlotMap[a.id]??98)-(unitSlotMap[b.id]??98));
       mainUnits.forEach(u=>{
@@ -6671,7 +6674,10 @@ const G={
           return;
         } else {
           // Not my unit — find who owns it
-          const unitSlotMap={'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
+          // unitSlotMap: unit id → player slot that controls it
+      // Slot order: 0(player_0) → 1(enemy_2) → 2(player_1) → 3(enemy_3)
+      // enemy_2 is controlled by slot-1 player, enemy_3 by slot-3 player
+      const unitSlotMap={'player_0':0,'enemy_2':1,'player_1':2,'enemy_3':3};
           // For servants/clones/turrets, owner = servantOwner/cloneOwner/owner
           const ownerId = u.servantOwner||u.cloneOwner||u.owner||u.id;
           const ownerSlot = unitSlotMap[ownerId]??unitSlotMap[u.id]??-1;
