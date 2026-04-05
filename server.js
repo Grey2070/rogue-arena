@@ -164,9 +164,14 @@ class Room {
   fillWithBots() {
     const needed = this.slots - this.players.length;
     for (let i = 0; i < needed; i++) {
+      const slot = this.players.length;
       this.players.push({
-        ws: null, pseudo: `IA_${i+1}`, team: this.players.length <= 1 ? 'enemy' : 'enemy',
-        isBot: true, sessionId: uid(), slot: this.players.length
+        ws: null,
+        pseudo: `IA_${i + 1}`,
+        team: (slot === 0 || slot === 2) ? 'player' : 'enemy',
+        isBot: true,
+        sessionId: uid(),
+        slot
       });
     }
     log(`Room ${this.id}: ${needed} bot(s) ajouté(s)`);
@@ -257,31 +262,42 @@ function tryMatch(mode) {
         team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
     });
   } else {
-    // 2v2: assign slots respecting preferences
-    // Try to honor slot preferences, fill remaining slots in order
+    // 2v2: smart team-balanced slot assignment
+    const assigned = new Map();
     const usedSlots = new Set();
-    const assigned = new Map(); // ws → slot
 
-    // First pass: honor preferences
+    // 1. Honor preferences first
     matched.forEach(p => {
-      const pref = p._slotPref;
-      if (pref !== undefined && !usedSlots.has(pref)) {
-        usedSlots.add(pref);
-        assigned.set(p.ws, pref);
+      if (p._slotPref !== undefined && !usedSlots.has(p._slotPref)) {
+        assigned.set(p.ws, p._slotPref);
+        usedSlots.add(p._slotPref);
       }
     });
-    // Second pass: fill unassigned
-    const allSlots = [0,1,2,3];
+
+    // 2. Fill remaining with team balance
+    const allSlots = [0, 1, 2, 3];
     matched.forEach(p => {
       if (!assigned.has(p.ws)) {
-        const free = allSlots.find(s => !usedSlots.has(s));
-        if (free !== undefined) { usedSlots.add(free); assigned.set(p.ws, free); }
+        const teamCounts = { player: 0, enemy: 0 };
+        assigned.forEach(slot => {
+          if (slot === 0 || slot === 2) teamCounts.player++;
+          else teamCounts.enemy++;
+        });
+        const preferredTeam = teamCounts.player > teamCounts.enemy ? 'enemy' : 'player';
+        let freeSlot = allSlots.find(s =>
+          !usedSlots.has(s) &&
+          ((preferredTeam === 'player' && (s === 0 || s === 2)) ||
+           (preferredTeam === 'enemy'  && (s === 1 || s === 3)))
+        );
+        if (freeSlot === undefined) freeSlot = allSlots.find(s => !usedSlots.has(s));
+        assigned.set(p.ws, freeSlot);
+        usedSlots.add(freeSlot);
       }
     });
 
     matched.forEach(p => {
       const slot = assigned.get(p.ws) ?? matched.indexOf(p);
-      const team = (slot===0||slot===2) ? 'player' : 'enemy';
+      const team = (slot === 0 || slot === 2) ? 'player' : 'enemy';
       room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
         team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
     });
@@ -382,32 +398,33 @@ function startPBStep(room) {
     timeLeft: 15,
     total: steps.length
   });
-  // Auto-pick for bots or AFK after 15s
-  const teamPlayer = room.players.find(p => p.slot === curSlot && !p.isBot);
-  if (!teamPlayer) {
-    // Bot slot: auto-pick after short delay
-    setTimeout(() => autoPickBot(room, step), 1500);
+  // Auto-pick for bots or AFK
+  const currentPlayer = getPlayerBySlot(room, curSlot);
+  if (!currentPlayer || currentPlayer.isBot) {
+    setTimeout(() => autoPickBot(room, step), 1000);
   } else {
-    // Human slot: auto-pick only if they go AFK (15s)
-    setTimeout(() => autoPickBot(room, step), 15500);
+    // Human: auto-pick after 15s AFK
+    if (room.pbTimer) clearTimeout(room.pbTimer);
+    room.pbTimer = setTimeout(() => autoPickBot(room, step), 15000);
   }
-  // Global timeout 16s
-  if (room.pbTimer) clearTimeout(room.pbTimer);
-  room.pbTimer = setTimeout(() => {
-    if (room.state !== 'pick_ban' || room.pbStep !== steps.length - (steps.length - room.pbStep)) return;
-    autoPickBot(room, step);
-  }, 16000);
+}
+
+function getPlayerBySlot(room, slot) {
+  return room.players.find(p => p.slot === slot);
 }
 
 function autoPickBot(room, step) {
-  if (room.state !== 'pick_ban') return;
+  if (!room || room.state !== 'pick_ban') return;
   const steps = room.mode === '2v2' ? PB_STEPS_2V2 : PB_STEPS;
   const currentStep = steps[room.pbStep];
   if (!currentStep || currentStep.team !== step.team || currentStep.type !== step.type) return;
   // Send as objects keyed by slot for correct client mapping
   const banned = room.pbBans;
   const picked = room.pbPicks;
-  const used   = [...banned, ...picked];
+  const used = [
+    ...Object.values(banned),
+    ...Object.values(picked)
+  ].filter(Boolean);
   const allHeroes = ['pyro','cryo','rogue','paladin','archer','necro','storm','shaman',
     'shadow','berserker','adventurer','smuggler','dragonmaster','runesmith','enchanter',
     'ninja','samurai','dryad','monk','alchemist','golem','ondelame'];
@@ -434,6 +451,12 @@ function applyPBChoice(room, slot, type, heroId) {
 }
 
 // ── Gestion des actions de jeu ───────────────────────────────────
+function hasRealOpponent(room) {
+  const teams = { player: 0, enemy: 0 };
+  room.players.forEach(p => { if (!p.isBot) teams[p.team]++; });
+  return teams.player > 0 && teams.enemy > 0;
+}
+
 function handleGameAction(ws, msg) {
   const pd = players.get(ws);
   if (!pd || !pd.room) return;
@@ -456,9 +479,21 @@ function handleGameAction(ws, msg) {
           const qp = queues[mode2].splice(qi, 1)[0];
           clearTimeout(qp.botTimerRef);
           const nr = new Room(uid(), mode2);
-          nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId,
-            team:'player', isBot:false, slot:0, _ip:ws._ip||'0.0.0.0'});
-          nr.fillWithBots();
+          if (mode2 === '1v1') {
+            nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId,
+              team:'player', isBot:false, slot:0, _ip:ws._ip||'0.0.0.0'});
+            nr.players.push({ws:null, pseudo:'IA_1', team:'enemy',
+              isBot:true, sessionId:uid(), slot:1});
+          } else {
+            nr.players.push({ws, pseudo:qp.pseudo, sessionId:qp.sessionId,
+              team:'player', isBot:false, slot:0, _ip:ws._ip||'0.0.0.0'});
+            nr.players.push({ws:null, pseudo:'IA_ally', team:'player',
+              isBot:true, sessionId:uid(), slot:2});
+            nr.players.push({ws:null, pseudo:'IA_enemy1', team:'enemy',
+              isBot:true, sessionId:uid(), slot:1});
+            nr.players.push({ws:null, pseudo:'IA_enemy2', team:'enemy',
+              isBot:true, sessionId:uid(), slot:3});
+          }
           rooms.set(nr.id, nr);
           if (pd2) pd2.room = nr.id;
           else players.set(ws, {pseudo:qp.pseudo,sessionId:qp.sessionId,room:nr.id,_ip:ws._ip||'0.0.0.0'});
@@ -589,8 +624,15 @@ function handleGameAction(ws, msg) {
     case 'chat': break; // chat in-game désactivé
 
     case 'game_over':
-      // Deduplicate: only update ELO once per game
+      // Deduplicate + only update ELO if there's a real opponent
       if (room._eloUpdated) { break; }
+      if (!hasRealOpponent(room)) {
+        log(`Room ${room.id}: no real opponent — ELO skipped`);
+        room.state = 'finished';
+        room.broadcastAll({ type: 'game_over', winner: msg.winner });
+        setTimeout(() => rooms.delete(room.id), 30000);
+        break;
+      }
       room._eloUpdated = true;
       room.state = 'finished';
       room.broadcastAll({ type: 'game_over', winner: msg.winner });
