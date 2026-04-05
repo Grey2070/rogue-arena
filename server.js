@@ -308,7 +308,7 @@ function tryMatch(mode) {
       queues._2v2MatchTimer = setTimeout(() => {
         queues._2v2MatchTimer = null;
         if (queues['2v2'].length >= 2) forceMatchWithBots('2v2');
-      }, 8000); // Wait 8s for more players, then force with bots
+      }, 30000); // Wait 30s for more players, then force with bots
     }
     return; // Don't match immediately with only 2 players
   }
