@@ -212,7 +212,11 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
     const remaining = Math.max(0, 60 - elapsed);
     send(p.ws, { type: 'queue_joined', mode, position: idx + 1,
       required, timeout: remaining,
-      queuePlayers: queue.map(q => ({ pseudo: q.pseudo })) });
+      queuePlayers: queue.map((q, qi) => ({
+        pseudo: q.pseudo,
+        slot: q._slotPref ?? qi,
+        team: q._slotPref !== undefined ? ((q._slotPref===0||q._slotPref===2)?'player':'enemy') : (qi<2?'player':'enemy')
+      })) });
   });
 
   // Timer 60s → remplir avec bots
@@ -284,44 +288,38 @@ function tryMatch(mode) {
   }
 
   rooms.set(room.id, room);
-  // Update pd.room for all matched players
-  room.players.forEach(p => {
-    if (p.ws) {
-      const pd = players.get(p.ws);
-      if (pd) { pd.room = room.id; pd._ip = p._ip; }
-      else players.set(p.ws, {pseudo:p.pseudo,sessionId:p.sessionId,room:room.id,_ip:p._ip||'0.0.0.0'});
-    }
-  });
-
-  // Notify all players
-  const playerList = room.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
-  room.players.filter(p=>p.ws).forEach(p => {
-    send(p.ws, {type:'match_found', roomId:room.id, mode, players:playerList});
-  });
-
-  log(`Match ${mode}: ${room.players.map(p=>p.pseudo).join(' vs ')}`);
-  startRoom(room);
+  log(`Match ${mode}: ${room.players.map(p=>p.pseudo).join(' vs ')} (slots: ${room.players.map(p=>p.slot).join(',')})`);
+  startRoom(room); // startRoom handles match_found + pd.room update
 }
 
 
 function startRoom(room) {
-  room.state = 'pick_ban';
+  room.state   = 'pick_ban';
   room.pbStep  = 0;
   room.pbBans  = {};
   room.pbPicks = {};
   room.pbTimer = null;
-  // Update pd.room for all players so handleGameAction can find the room
+
+  // Update pd.room for ALL players (human + bot slots)
   room.players.forEach(p => {
     if (p.ws) {
       const pd = players.get(p.ws);
-      if (pd) pd.room = room.id;
+      if (pd) { pd.room = room.id; }
+      else players.set(p.ws, {pseudo:p.pseudo, sessionId:p.sessionId||'', room:room.id, _ip:p._ip||'0.0.0.0'});
     }
   });
+
   const playerList = room.players.map(p => ({
     pseudo: p.pseudo, team: p.team, slot: p.slot, isBot: p.isBot
   }));
-  room.broadcastAll({ type: 'match_found', roomId: room.id, mode: room.mode, players: playerList });
-  // Start PB sequence after 3s
+
+  // Send match_found individually so each client knows their slot
+  room.players.filter(p => p.ws && !p.isBot).forEach(p => {
+    send(p.ws, { type: 'match_found', roomId: room.id, mode: room.mode, players: playerList });
+  });
+
+  log(`Room ${room.id} (${room.mode}): PB starts in 3s — ${room.players.map(p=>p.pseudo+'['+p.slot+']').join(' ')}`);
+  // PB starts after client countdown (3s)
   setTimeout(() => startPBStep(room), 3000);
 }
 
@@ -476,16 +474,20 @@ function handleGameAction(ws, msg) {
         }
       }
 
-      // Start room if it exists and hasn't started playing yet
-      if (launchRoom && launchRoom.state !== 'playing' && launchRoom.state !== 'finished') {
-        if (!launchRoom.isFull()) launchRoom.fillWithBots();
+      if (launchRoom) {
         if (launchRoom.state === 'waiting') {
+          // Not started yet: fill bots and start
+          if (!launchRoom.isFull()) launchRoom.fillWithBots();
           startRoom(launchRoom);
+          log(`Room ${launchRoom.id}: lancée manuellement`);
+        } else if (launchRoom.state === 'pick_ban') {
+          // Already in PB: re-notify player and re-send current PB turn
+          const lrPlayers = launchRoom.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
+          send(ws, {type:'match_found', roomId:launchRoom.id, mode:launchRoom.mode, players:lrPlayers});
+          setTimeout(() => startPBStep(launchRoom), 500);
+          log(`Room ${launchRoom.id}: PB re-notifié à ${pd2?.pseudo}`);
         }
-        // Always notify the requesting player (may have missed match_found)
-        const lrPlayers = launchRoom.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
-        send(ws, {type:'match_found', roomId:launchRoom.id, mode:launchRoom.mode, players:lrPlayers});
-        log(`Room ${launchRoom.id}: lancée/notifiée manuellement`);
+        // If playing/finished: nothing to do
       }
       break;
     }

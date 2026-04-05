@@ -4134,7 +4134,8 @@ const G={
     if(!inGrid(t.x,t.y)||isMobile()){tip.classList.remove('vis');return;}
     const u=this.getUnitAt(t.x,t.y);
     // Don't reveal camouflaged enemies via tooltip
-    if(u&&u.team!=='player'&&u.statusEffects&&u.statusEffects.some(s=>s.type==='camouflage')){
+    const _tipMyTeam=(G.mp&&G.mp._isOnline&&G.mp._myTeam)||'player';
+    if(u&&u.team!==_tipMyTeam&&u.statusEffects&&u.statusEffects.some(s=>s.type==='camouflage')){
       tip.classList.remove('vis');return;
     }
     // Vérifier aussi les tourelles
@@ -4258,13 +4259,14 @@ const G={
       if(item.type==='unit'){
         const u=item.obj;
         const isCamouflaged=u.statusEffects&&u.statusEffects.some(s=>s.type==='camouflage');
-        // Rendre invisible pour l'équipe adverse (pas pour les alliés du joueur)
-        if(isCamouflaged&&u.team!=='player'){
-          // Ne pas dessiner du tout (invisible pour le joueur)
-          return;
+        // Équipe locale : 'player' en hors-ligne, ou G.mp._myTeam en ligne
+        const _myTeam=(G.mp&&G.mp._isOnline&&G.mp._myTeam)||'player';
+        // Invisible pour l'équipe adverse
+        if(isCamouflaged&&u.team!==_myTeam){
+          return; // Ne pas dessiner (invisible pour l'adversaire)
         }
         // Si allié camouflé : le dessiner semi-transparent pour le joueur
-        if(isCamouflaged&&u.team==='player'){
+        if(isCamouflaged&&u.team===_myTeam){
           // Dessiné normalement mais avec l'effet visuel géré dans drawSprite
         }
       }
@@ -8837,12 +8839,14 @@ G.mp = {
       case 'match_found':
         this._stopTimer();
         this.roomId = msg.roomId;
-        this.players = msg.players;
-        const meFound = msg.players.find(p => !p.isBot && p.pseudo === this.pseudo);
-        this.mySlot = meFound?.slot ?? 0;
-        this.isHost = (this.mySlot === 0);
-        G.mp._log('✅ Match! slot=' + this.mySlot + ' ' + msg.players.map(p=>p.pseudo).join(' vs '));
-        G.mp._startPickBan(msg);
+        this.players = msg.players || [];
+        {
+          const meNow = this.players.find(p => !p.isBot && p.pseudo === this.pseudo);
+          this.mySlot  = meNow?.slot ?? 0;
+          this.isHost  = (this.mySlot === 0);
+          G.mp._log('✅ Match! roomId=' + msg.roomId + ' slot=' + this.mySlot);
+          G.mp._startPickBan(msg);
+        }
         break;
 
       case 'pb_turn':
