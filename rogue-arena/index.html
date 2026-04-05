@@ -3928,7 +3928,9 @@ const G={
     // 🔴 Équipe rouge (enemy) = bas-droite (7,7)
     const eh=HEROES.find(h=>h.id===pb.enemyPick);
     if(eh)this.units.push(this.mkUnit(eh,'enemy',1,7,7));
-    this._buildingInitial=true;this.buildTurnOrder();this._buildingInitial=false;this.turnIdx=0;this.showScreen('game');this.setupCanvas();
+    this._buildingInitial=true;this.buildTurnOrder();this._buildingInitial=false;this.turnIdx=0;
+    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
+    this.showScreen('game');this.setupCanvas();
     const at1=document.getElementById('ally-title');if(at1)at1.textContent='⚔ ALLIÉS';
     const et1=document.getElementById('enemy-title');if(et1)et1.textContent='💀 ENNEMIS';
     this.startMusic();
@@ -8348,6 +8350,7 @@ const G={
       if(h)this.units.push(this.mkUnit(h,'enemy',i+2,spawnsB[i].x,spawnsB[i].y));
     });
     this._buildingInitial=true;this.buildTurnOrder();this._buildingInitial=false;this.turnIdx=0;
+    if(G.mp&&G.mp._isOnline)G.mp._assignUnitControl();
     this.showScreen('game');
     this.setupCanvas();
     const rl=document.getElementById('rnd-lbl');
@@ -9402,6 +9405,10 @@ G.mp = {
       pb.playerPick = msg.picks['0'] || msg.picks[0] || null;
       pb.enemyPick  = msg.picks['1'] || msg.picks[1] || null;
       G.mp._myUnitId = slotToUnitId[G.mp.mySlot] || 'player_0';
+      // Set team/idx for mkUnit patch
+      G.mp._myUnitTeam = G.mp._myUnitId.split('_')[0]; // 'player' or 'enemy'
+      G.mp._myUnitIdx  = 0; // 1v1: always index 0 within the team
+      G.mp._assignUnitControl_preStart('1v1');
       G.startGame();
     } else {
       pb.picksA = [msg.picks['0']||msg.picks[0], msg.picks['2']||msg.picks[2]].filter(Boolean);
@@ -9410,6 +9417,13 @@ G.mp = {
       const meFromServer = msg.players?.find(p => !p.isBot && p.pseudo === G.mp.pseudo);
       if (meFromServer) G.mp.mySlot = meFromServer.slot;
       G.mp._myUnitId = slotToUnitId2v2[G.mp.mySlot] ?? 'player_0';
+      // Set team/idx for mkUnit patch
+      // player_0→idx0, player_1→idx1, enemy_2→idx0(within enemy), enemy_3→idx1(within enemy)
+      const _uid = G.mp._myUnitId;
+      G.mp._myUnitTeam = _uid.startsWith('player') ? 'player' : 'enemy';
+      // Index within the team: player_0→0, player_1→1, enemy_2→0, enemy_3→1
+      G.mp._myUnitIdx  = (_uid==='player_1'||_uid==='enemy_3') ? 1 : 0;
+      G.mp._assignUnitControl_preStart('2v2');
       G.startGame2v2();
     }
   },
