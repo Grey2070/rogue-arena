@@ -8963,65 +8963,9 @@ G.mp = {
 
   // ── Démarrer le pick/ban multijoueur ───────────────────────────
   _startPickBan(matchData) {
-    // Afficher l'écran lobby avec le panneau de match trouvé
-    G.showScreen('lobby');
-    // Cacher form et queue
-    const fEl = document.getElementById('lobby-pseudo-form');
-    const qEl = document.getElementById('lobby-queue');
-    if (fEl) fEl.style.display = 'none';
-    if (qEl) qEl.style.display = 'none';
-
-    // Injecter un panneau de match trouvé dans la lobby-wrap
-    const wrap = document.querySelector('#sc-lobby .lobby-wrap');
-    if (!wrap) { G.mp._launchOnlineGame(matchData); return; }
-
-    const existing = document.getElementById('match-found-panel');
-    if (existing) existing.remove();
-
-    const panel = document.createElement('div');
-    panel.id = 'match-found-panel';
-    panel.className = 'lobby-panel';
-    panel.style.cssText = 'animation:none;gap:14px';
-    const teamA = matchData.players.filter(p => p.team === 'player');
-    const teamB = matchData.players.filter(p => p.team === 'enemy');
-    const mkTeam = (players, color) =>
-      players.map(p => `<div style="color:${color}">${p.pseudo}${p.isBot?' 🤖':''}</div>`).join('');
-    panel.innerHTML = `
-      <div style="color:#40c8e8;font-size:1.1em;letter-spacing:2px">⚔ MATCH TROUVÉ !</div>
-      <div style="display:flex;gap:20px;align-items:center;justify-content:center;flex-wrap:wrap">
-        <div style="text-align:center;font-size:.82em">${mkTeam(teamA,'#4080ff')}</div>
-        <div style="color:#607080;font-size:1.1em">VS</div>
-        <div style="text-align:center;font-size:.82em">${mkTeam(teamB,'#e04040')}</div>
-      </div>
-      <div style="color:#607080;font-size:.75em">Lancement dans <span id="match-countdown">3</span>s…</div>`;
-    wrap.appendChild(panel);
-
-    if (matchData.mode === '2v2') {
-      // Slots already chosen during queue — just launch after countdown
-      let cd = 3;
-      const iv2v2 = setInterval(() => {
-        cd--;
-        const el = document.getElementById('match-countdown');
-        if (el) el.textContent = cd;
-        if (cd <= 0) {
-          clearInterval(iv2v2);
-          panel.remove();
-          G.mp._launchOnlineGame(matchData);
-        }
-      }, 1000);
-    } else {
-      let cd = 3;
-      const iv = setInterval(() => {
-        cd--;
-        const el = document.getElementById('match-countdown');
-        if (el) el.textContent = cd;
-        if (cd <= 0) {
-          clearInterval(iv);
-          panel.remove();
-          G.mp._launchOnlineGame(matchData);
-        }
-      }, 1000);
-    }
+    // Directly launch PB — no intermediate panel that delays the PB screen
+    // Server sends pb_turn 3s after startRoom; we need to be ready
+    G.mp._launchOnlineGame(matchData);
   },
 
   _show2v2SlotPicker(matchData, panel) {
@@ -9653,7 +9597,12 @@ G.mp = {
         (caster?.servantOwner===G.mp._myUnitId||caster?.cloneOwner===G.mp._myUnitId);
       const isMyTurret = caster?._isTurret && caster?.owner===G.mp._myUnitId;
       if (isMyUnit || isMyServant || isMyTurret) {
-        G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty });
+        const seed = (Math.random() * 0xFFFFFFFF) >>> 0; // pre-generate seed
+        _installSeed(seed); // use same seed locally
+        G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty, seed });
+        _origCastSkill(caster, sk, tx, ty);
+        _removeSeed();
+        return;
       }
     }
     _origCastSkill(caster, sk, tx, ty);
