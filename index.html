@@ -6687,7 +6687,7 @@ const G={
         if(isMyMain){
           // Falls through to isHumanTurn below (human player)
         } else if(isMyServant||isMyTurret){
-          // My own entity → run AI locally and broadcast
+          // My servant/turret/clone — _runningAIFor not needed (patches use isMyServant/isMyTurret)
           setTimeout(()=>this.runAI(u),400);
           return;
         } else {
@@ -6714,8 +6714,13 @@ const G={
           const isBot = !humanSlots.has(ownerSlot) || u._botFallback;
           if(isBot){
             if(G.mp.mySlot===0){
-              // Host runs AI for all bot units
-              setTimeout(()=>this.runAI(u),600);
+              // Host runs AI for all bot units — set flag so patches broadcast
+              G.mp._runningAIFor = u.id;
+              setTimeout(()=>{
+                this.runAI(u);
+                // Clear after a delay (AI actions complete within ~2s)
+                setTimeout(()=>{ G.mp._runningAIFor = null; }, 2000);
+              },600);
             } else {
               this.log('⏳ Tour de '+u.name+'...','sys');
             }
@@ -7594,7 +7599,7 @@ const G={
       if(G.mp&&G.mp._isOnline){
         // Online: ALWAYS send end_turn and let server/applyRemoteAction advance everyone
         // This includes: bots run by host, servants, turrets, clones
-        G.mp.sendAction({type:'end_turn'});
+        G.mp.sendAction({type:'end_turn', unitId: unit.id});
         return; // _applyRemoteAction handles turnIdx++ for ALL clients
       }
       // Offline: advance locally
@@ -9666,7 +9671,9 @@ G.mp = {
       const isMyServant = (unit?.isServant||unit?.isClone) &&
         (unit?.servantOwner===G.mp._myUnitId||unit?.cloneOwner===G.mp._myUnitId);
       const isMyTurret = unit?._isTurret && unit?.owner===G.mp._myUnitId;
-      if (isMyUnit || isMyServant || isMyTurret) {
+      // Also broadcast for bot units being AI-controlled by this client
+      const isHostAI = G.mp._runningAIFor === unit?.id;
+      if (isMyUnit || isMyServant || isMyTurret || isHostAI) {
         G.mp.sendAction({ type: 'move', unitId: unit.id, tx, ty });
       }
     }
@@ -9681,7 +9688,8 @@ G.mp = {
       const isMyServant = (caster?.isServant||caster?.isClone) &&
         (caster?.servantOwner===G.mp._myUnitId||caster?.cloneOwner===G.mp._myUnitId);
       const isMyTurret = caster?._isTurret && caster?.owner===G.mp._myUnitId;
-      if (isMyUnit || isMyServant || isMyTurret) {
+      const isHostAI2 = G.mp._runningAIFor === caster?.id;
+      if (isMyUnit || isMyServant || isMyTurret || isHostAI2) {
         // Generate seed for deterministic random outcomes
         const seed = (Math._origRandom||Math.random)() * 0xFFFFFFFF >>> 0;
         G.mp._activeSeed = seed;
