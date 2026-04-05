@@ -702,6 +702,18 @@ function handleGameAction(ws, msg) {
 
     case 'chat': break; // chat in-game désactivé
 
+    case 'skin_choice': {
+      // Relay skin choice to all players in room
+      if (room) {
+        room.broadcastAll({
+          type: 'skin_choice',
+          slot: msg.slot,
+          skin: msg.skin
+        });
+      }
+      break;
+    }
+
     case 'request_sync': {
       // Client requests full action log to recover from freeze
       if (!room || room.state !== 'playing') break;
