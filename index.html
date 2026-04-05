@@ -169,11 +169,14 @@ canvas{image-rendering:pixelated;display:block}
 }
 
 /* ═══ GAME SCREEN — PC ══════════════════════════════════════ */
-#sc-game{flex-direction:row;overflow:hidden;position:relative}
+#sc-game{flex-direction:row;overflow:hidden;position:relative;height:100vh;max-height:100vh}
 
 /* Left/Right panels — PC */
-.l-panel,.r-panel{background:var(--panel);display:flex;flex-direction:column;padding:8px;gap:5px;overflow-y:auto;flex-shrink:0;position:relative;z-index:10}
-.l-panel{width:clamp(150px,16vw,200px);border-right:2px solid var(--border)}
+.l-panel,.r-panel{background:var(--panel);display:flex;flex-direction:column;
+  padding:8px;gap:5px;overflow:hidden;flex-shrink:0;position:relative;z-index:10;
+  height:100vh;max-height:100vh;box-sizing:border-box}
+.l-panel{width:clamp(150px,16vw,200px);border-right:2px solid var(--border);
+  height:100vh;max-height:100vh;overflow-y:auto;box-sizing:border-box;flex-shrink:0}
 .r-panel{width:clamp(170px,18vw,215px);border-left:2px solid var(--border)}
 .ptitle{font-family:'Press Start 2P',monospace;font-size:clamp(5px,1.2vw,7px);color:var(--dim);
   letter-spacing:2px;padding-bottom:4px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -195,7 +198,7 @@ canvas{image-rendering:pixelated;display:block}
 .mpb{background:rgba(74,232,200,.2);border:1px solid var(--accent2);padding:1px 4px;color:var(--accent2)}
 
 /* Map area */
-.map-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-width:0}
+.map-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-width:0;min-height:0}
 .g-hdr{background:var(--panel);border-bottom:2px solid var(--border);
   padding:6px 12px;display:flex;align-items:center;justify-content:space-between;
   font-family:'Press Start 2P',monospace;font-size:clamp(5px,1.2vw,7px);flex-shrink:0}
@@ -230,8 +233,9 @@ canvas{image-rendering:pixelated;display:block}
 
 /* Skill panel */
 .sk-info{border:1px solid var(--border);background:rgba(255,255,255,.02);padding:6px;
-  font-size:clamp(11px,1.8vw,13px);min-height:40px;color:var(--dim);line-height:1.4;flex-shrink:0}
-.skl{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1}
+  font-size:clamp(11px,1.8vw,13px);min-height:30px;max-height:60px;overflow:hidden;
+  color:var(--dim);line-height:1.4;flex-shrink:0}
+.skl{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;min-height:0}
 .skbtn{border:2px solid var(--border);background:rgba(255,255,255,.02);padding:6px;
   cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;text-align:left;flex-shrink:0}
 .skbtn:hover:not(.skdis),.skbtn:active:not(.skdis){border-color:var(--accent);background:rgba(232,200,74,.05)}
@@ -276,10 +280,12 @@ canvas{image-rendering:pixelated;display:block}
 #timer-bar .tb-fill{height:100%;background:var(--accent2);transition:width 1s linear}
 #timer-bar .tb-fill.urgent{background:var(--red)}
 @media(max-width:768px){#timer-bar{padding:5px 10px;font-size:8px;}}
+#timer-bar{flex-shrink:0;max-height:36px;overflow:hidden}
 
 .etbtn{font-family:'Press Start 2P',monospace;font-size:clamp(7px,1.5vw,8px);
   background:transparent;border:2px solid var(--accent);color:var(--accent);
-  padding:8px;cursor:pointer;transition:all .15s;margin-top:auto;flex-shrink:0}
+  padding:10px 8px;cursor:pointer;transition:all .15s;margin-top:auto;flex-shrink:0;
+  position:sticky;bottom:0;z-index:5}
 .etbtn:hover,.etbtn:active{background:var(--accent);color:var(--bg)}
 .etbtn:disabled{opacity:.35;cursor:not-allowed}
 
@@ -292,8 +298,8 @@ canvas{image-rendering:pixelated;display:block}
   .g-hdr{padding:5px 8px}
   #ap-lbl{display:none} /* shown in drawer instead */
 
-  /* Map takes most of screen */
-  #map-wrap{flex:1;min-height:0;overflow:hidden}
+  /* Map takes remaining space above bottom bar */
+  #map-wrap{flex:1;min-height:0;overflow:hidden;max-height:calc(100vh - 160px)}
   #gc{cursor:crosshair}
 
   /* Compact battle log */
@@ -302,7 +308,8 @@ canvas{image-rendering:pixelated;display:block}
   /* Mobile bottom bar */
   .mob-bar{display:flex;background:var(--panel);border-top:2px solid var(--border);
     height:auto;flex-shrink:0;flex-direction:column;overflow:hidden;
-    padding-bottom:var(--safe-bottom)}
+    padding-bottom:env(safe-area-inset-bottom,var(--safe-bottom));
+    max-height:55vh;/* Never take more than half screen */}
 
   /* Unit strips: scrollable horizontal */
   .mob-units{display:flex;overflow-x:auto;gap:6px;padding:5px 8px;
@@ -330,7 +337,7 @@ canvas{image-rendering:pixelated;display:block}
 
   /* Skill drawer */
   .mob-drawer{overflow:hidden;transition:max-height .3s ease;max-height:0;flex-shrink:0;position:relative}
-  .mob-drawer.open{max-height:260px}
+  .mob-drawer.open{max-height:min(260px,35vh)}
   .mob-drawer-inner{display:flex;flex-direction:column;gap:0;overflow-y:auto;max-height:260px;padding:4px 6px 6px}
 
   /* Mobile skill buttons: compact horizontal layout */
@@ -3917,7 +3924,7 @@ const G={
     // 🔴 Équipe rouge (enemy) = bas-droite (7,7)
     const eh=HEROES.find(h=>h.id===pb.enemyPick);
     if(eh)this.units.push(this.mkUnit(eh,'enemy',1,7,7));
-    this.buildTurnOrder();this.showScreen('game');this.setupCanvas();
+    this._buildingInitial=true;this.buildTurnOrder();this._buildingInitial=false;this.turnIdx=0;this.showScreen('game');this.setupCanvas();
     const at1=document.getElementById('ally-title');if(at1)at1.textContent='⚔ ALLIÉS';
     const et1=document.getElementById('enemy-title');if(et1)et1.textContent='💀 ENNEMIS';
     this.startMusic();
@@ -3962,7 +3969,9 @@ const G={
         }
       }
     }
-    this.turnIdx=0;
+    // NEVER reset turnIdx here — it's managed by endTurn/endTurnAI
+    // Only reset on initial game start (called from startGame/startGame2v2)
+    if(this._buildingInitial)this.turnIdx=0;
   },
 
   // ── CANVAS SETUP ───────────────────────────────────────────
@@ -7495,20 +7504,13 @@ const G={
     if(!_nxtIsUnit||(this.turnIdx+1>=this.turnOrder.length))this.tickGroundFx();
     setTimeout(()=>{
       if(this.checkWin())return;
-      // Online: servant/clone/turret owned by me → send end_turn, don't advance locally
       if(G.mp&&G.mp._isOnline){
-        const isMyServant=(unit.isServant||unit.isClone)&&
-          (unit.servantOwner===G.mp._myUnitId||unit.cloneOwner===G.mp._myUnitId);
-        const isMyTurret=unit._isTurret&&unit.owner===G.mp._myUnitId;
-        if(isMyServant||isMyTurret){
-          G.mp.sendAction({type:'end_turn'});
-          return; // _applyRemoteAction will advance turnIdx on ALL clients
-        }
-        // Opponent's servant/turret: already advanced via _applyRemoteAction, don't double-advance
-        const isOpponent = (unit.isServant||unit.isClone||unit._isTurret) &&
-          !((unit.servantOwner||unit.cloneOwner||unit.owner)===G.mp._myUnitId);
-        if(isOpponent) return;
+        // Online: ALWAYS send end_turn and let server/applyRemoteAction advance everyone
+        // This includes: bots run by host, servants, turrets, clones
+        G.mp.sendAction({type:'end_turn'});
+        return; // _applyRemoteAction handles turnIdx++ for ALL clients
       }
+      // Offline: advance locally
       this.turnIdx++;
       this.startNewTurn();
     },300);
@@ -8276,7 +8278,7 @@ const G={
       const h=HEROES.find(x=>x.id===heroId);
       if(h)this.units.push(this.mkUnit(h,'enemy',i+2,spawnsB[i].x,spawnsB[i].y));
     });
-    this.buildTurnOrder();
+    this._buildingInitial=true;this.buildTurnOrder();this._buildingInitial=false;this.turnIdx=0;
     this.showScreen('game');
     this.setupCanvas();
     const rl=document.getElementById('rnd-lbl');
@@ -9191,7 +9193,8 @@ G.mp = {
           const orig = G.castSkill.__original || G.castSkill;
           orig.call(G, u, sk, action.tx, action.ty);
           // After skill applied, rebuild turnOrder (may have added servants/turrets)
-          if (G.units) G.buildTurnOrder?.();
+          // Don't rebuild full turnOrder mid-game (would reset turnIdx)
+          // Servants/turrets are spliced in at correct position by the skill handlers
         }
         break;
       }
@@ -9591,8 +9594,8 @@ G.mp = {
       }
     }
     _origCastSkill(caster, sk, tx, ty);
-    // Rebuild turnOrder if new entities were created (servants, turrets, clones)
-    if (G.mp._isOnline && G.units) setTimeout(() => G.buildTurnOrder?.(), 50);
+    // Don't rebuild full turnOrder (would reset position)
+    // New entities are inserted via splice in their respective cast handlers
   };
   G.castSkill.__original = _origCastSkill;
 })();
