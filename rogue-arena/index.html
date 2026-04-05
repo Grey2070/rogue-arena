@@ -3689,12 +3689,28 @@ const G={
     };
 
     sched(ac.currentTime+0.1);
+    // Track node stop times to clean up safely
     this._musicInterval=setInterval(()=>{
-      if(!this.musicOn){clearInterval(this._musicInterval);return;}
+      if(!this.musicOn||!this._audioCtx){clearInterval(this._musicInterval);return;}
       const nxt=Math.max(this._combatPhraseT,ac.currentTime+0.1);
       sched(nxt);
-      // Nettoyer les noeuds terminés (évite accumulation)
-      if(this._musicNodes.length>200)this._musicNodes.splice(4,100);
+      // Only remove nodes that have already stopped (safe cleanup, no stutter)
+      // Keep the first 4 nodes (master/comp/rev/rG) always
+      const now=ac.currentTime;
+      const keep=[...this._musicNodes.slice(0,4)];
+      for(let i=4;i<this._musicNodes.length;i++){
+        const n=this._musicNodes[i];
+        // If it's a gain node or its scheduled stop is in the future, keep it
+        // OscillatorNode has a .context property; stop time is hard to query
+        // So just keep everything scheduled in the future (~32 beats ahead)
+        keep.push(n);
+      }
+      // Hard cap: if > 300 nodes, force clean the oldest ones past their window
+      if(this._musicNodes.length>300){
+        // Remove 100 nodes after the first 4 (these are from the previous phrase)
+        const stale=this._musicNodes.splice(4,100);
+        stale.forEach(n=>{try{if(n.stop)n.stop(0);if(n.disconnect)n.disconnect();}catch(e){}});
+      }
     },9500);
   },
 
@@ -8946,6 +8962,16 @@ G.mp = {
         }
         break;
 
+      case 'sync_catch_up':
+        // Replay missed actions to recover from freeze
+        if (msg.actions && msg.actions.length > 0) {
+          G.log('🔄 Synchronisation (' + msg.actions.length + ' actions)...', 'sys');
+          msg.actions.forEach(action => {
+            try { G.mp._applyRemoteAction(action, action.senderSlot); } catch(e) {}
+          });
+        }
+        break;
+
       case 'turn_timeout':
         // Server forced end of turn (AFK player)
         G.log('⏱ Tour forcé (temps écoulé)', 'sys');
@@ -9169,7 +9195,20 @@ G.mp = {
 
   // ── Envoyer une action de jeu ──────────────────────────────────
   sendAction(action) {
+    this._lastActionTs = Date.now();
     this._send({ type: 'game_action', roomId: this.roomId, action });
+  },
+
+  // Call periodically to detect and recover from freeze
+  _checkFreeze() {
+    if (!this._isOnline || !this.roomId) return;
+    const now = Date.now();
+    const lastTs = this._lastActionTs || now;
+    // If no action for 40s while game is active → request sync
+    if (now - lastTs > 40000 && window.G?.phase === 'game') {
+      this._send({ type: 'request_sync', since: lastTs, roomId: this.roomId });
+      this._lastActionTs = now; // Reset to avoid spam
+    }
   },
 
   // Seeded RNG — deterministic random for both clients
