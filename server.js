@@ -245,10 +245,12 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
 
 function tryMatch(mode) {
   const queue = queues[mode];
-  const required = mode === '1v1' ? 2 : 4;
-  if (queue.length < required) return;
+  const minRequired = mode === '1v1' ? 2 : 2; // 2v2 needs only 2 humans (bots fill rest)
+  if (queue.length < minRequired) return;
 
-  const matched = queue.splice(0, required);
+  // For 2v2: take up to 4, fill rest with bots
+  const takeCount = mode === '2v2' ? Math.min(queue.length, 4) : 2;
+  const matched = queue.splice(0, takeCount);
   matched.forEach(p => clearTimeout(p.botTimerRef));
 
   const room = new Room(uid(), mode);
@@ -301,6 +303,8 @@ function tryMatch(mode) {
       room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
         team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
     });
+    // Fill remaining slots with bots
+    room.fillWithBots();
   }
 
   rooms.set(room.id, room);
