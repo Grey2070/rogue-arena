@@ -447,25 +447,27 @@ function handleGameAction(ws, msg) {
           if (pd2) pd2.room = nr.id;
           else players.set(ws, {pseudo:qp.pseudo,sessionId:qp.sessionId,room:nr.id,_ip:ws._ip||'0.0.0.0'});
           // Send match_found so client knows the room
-          startRoom(nr); // startRoom updates pd.room for all players
-          // Send match_found AFTER startRoom so pb_turn arrives after
-          send(ws, { type:'match_found', roomId:nr.id, mode:mode2,
-            players: nr.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot})) });
-          setTimeout(() => startPBStep(nr), 300); // Give client time to process match_found
+          startRoom(nr); // startRoom sets state=pick_ban and updates pd.room
+          // Send match_found then pb_turn with delay
+          const nrPlayers = nr.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
+          send(ws, {type:'match_found', roomId:nr.id, mode:mode2, players:nrPlayers});
+          // pb_turn will be sent by startRoom → startPBStep (already queued)
           log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
           launchRoom = nr;
           break;
         }
       }
 
-      // Start if launchRoom is still in waiting state (wasn't started above)
-      if (launchRoom && launchRoom.state === 'waiting') {
+      // Start room if it exists and hasn't started playing yet
+      if (launchRoom && launchRoom.state !== 'playing' && launchRoom.state !== 'finished') {
         if (!launchRoom.isFull()) launchRoom.fillWithBots();
-        startRoom(launchRoom);
-        // Notify the requesting player
+        if (launchRoom.state === 'waiting') {
+          startRoom(launchRoom);
+        }
+        // Always notify the requesting player (may have missed match_found)
         const lrPlayers = launchRoom.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
         send(ws, {type:'match_found', roomId:launchRoom.id, mode:launchRoom.mode, players:lrPlayers});
-        log(`Room ${launchRoom.id}: lancée manuellement`);
+        log(`Room ${launchRoom.id}: lancée/notifiée manuellement`);
       }
       break;
     }
