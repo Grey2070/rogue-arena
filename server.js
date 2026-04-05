@@ -447,19 +447,24 @@ function handleGameAction(ws, msg) {
           if (pd2) pd2.room = nr.id;
           else players.set(ws, {pseudo:qp.pseudo,sessionId:qp.sessionId,room:nr.id,_ip:ws._ip||'0.0.0.0'});
           // Send match_found so client knows the room
+          startRoom(nr); // startRoom updates pd.room for all players
+          // Send match_found AFTER startRoom so pb_turn arrives after
           send(ws, { type:'match_found', roomId:nr.id, mode:mode2,
             players: nr.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot})) });
+          setTimeout(() => startPBStep(nr), 300); // Give client time to process match_found
           log(`Room ${nr.id}: lancée depuis la file par ${qp.pseudo}`);
-          startRoom(nr); // Start immediately after creating from queue
           launchRoom = nr;
           break;
         }
       }
 
-      // Always start the room if we have one (queue case already called startRoom via match_found)
-      if (launchRoom && launchRoom.state !== 'playing' && launchRoom.state !== 'pick_ban') {
+      // Start if launchRoom is still in waiting state (wasn't started above)
+      if (launchRoom && launchRoom.state === 'waiting') {
         if (!launchRoom.isFull()) launchRoom.fillWithBots();
         startRoom(launchRoom);
+        // Notify the requesting player
+        const lrPlayers = launchRoom.players.map(p=>({pseudo:p.pseudo,team:p.team,slot:p.slot,isBot:p.isBot}));
+        send(ws, {type:'match_found', roomId:launchRoom.id, mode:launchRoom.mode, players:lrPlayers});
         log(`Room ${launchRoom.id}: lancée manuellement`);
       }
       break;

@@ -3933,18 +3933,19 @@ const G={
     // Online: order units by their online slot (J1→J2→J3→J4)
     // Offline: player first, then enemy (interleaved)
     if(G.mp._isOnline&&G.mp._gamePlayers){
-      // Map unit id to player slot for correct ordering
-      // slotToUnitId: 0→player_0, 1→enemy_1, 2→player_1, 3→enemy_3(but actually enemy_2 in 2v2)
+      // Main units sorted by slot
       const unitSlotMap={'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
-      const allUnits=[...pl,...en].sort((a,b)=>{
-        const sa=unitSlotMap[a.id]??99;
-        const sb=unitSlotMap[b.id]??99;
-        return sa-sb;
-      });
-      allUnits.forEach(u=>{
+      const mainUnits=[...pl,...en].filter(u=>!u.isServant&&!u.isClone);
+      mainUnits.sort((a,b)=>(unitSlotMap[a.id]??98)-(unitSlotMap[b.id]??98));
+      mainUnits.forEach(u=>{
         this.turnOrder.push(u.id);
+        // Add turrets owned by this unit
         this.turrets.filter(t=>t.alive&&t.owner===u.id)
           .forEach(t=>this.turnOrder.push(t.id));
+        // Add servants/clones owned by this unit (RIGHT after owner)
+        const owned=[...pl,...en].filter(s=>(s.isServant||s.isClone)&&
+          (s.servantOwner===u.id||s.cloneOwner===u.id)&&s.alive);
+        owned.forEach(s=>this.turnOrder.push(s.id));
       });
     } else {
       const mx=Math.max(pl.length,en.length);
@@ -6594,37 +6595,40 @@ const G={
         this.renderUnitList('ally-list',this.units.filter(u=>u.team==='player'));
         this.renderUnitList('enemy-list',this.units.filter(u=>u.team==='enemy'));
       }
-      // Online: route turn to correct client
+      // Online: determine who controls this unit
       if(G.mp&&G.mp._isOnline){
         const myId = G.mp._myUnitId;
-        const isMyMainUnit = (u.id===myId);
-        const isMyServant = (u.isServant||u.isClone) &&
+        const isMyMain = (u.id===myId);
+        const isMyServant = (u.isServant||u.isClone)&&
           (u.servantOwner===myId||u.cloneOwner===myId);
-        const isMyTurret = u._isTurret && u.owner===myId;
-        const isMyEntity = isMyMainUnit||isMyServant||isMyTurret;
-        if(!isMyEntity){
-          // Check if it's a bot unit (AI should run locally for bots)
-          const ownerSlot = G.mp._gamePlayers?.find(p=>
-            p.pseudo===u.heroId||(u.isServant&&p.slot===0)
-          );
-          // Is this unit owned by a bot player?
-          const unitTeam = u.team;
-          const humanOnTeam = G.mp._gamePlayers?.find(p=>!p.isBot&&p.team===unitTeam&&
-            (G.mode!=='2v2'||p.pseudo!==G.mp.pseudo));
-          // If no human on this team (bots only) or _botFallback: run AI
-          if(u._botFallback){
-            setTimeout(()=>this.runAI(u),800);
-            return;
-          }
-          this.log('⏳ Tour de '+u.name+'...','sys');
-          return;
-        }
-        if(!isMyMainUnit){
-          // My servant/turret/clone → AI runs locally
+        const isMyTurret = u._isTurret&&u.owner===myId;
+
+        if(isMyMain){
+          // Falls through to isHumanTurn below (human player)
+        } else if(isMyServant||isMyTurret){
+          // My own entity → run AI locally and broadcast
           setTimeout(()=>this.runAI(u),400);
           return;
+        } else {
+          // Not my unit — is it a bot? Only the HOST (slot 0) runs AI for bots
+          const isBot = G.mp._gamePlayers?.find(p=>
+            p.slot===(G.mp._unitOwnerSlot?.(u))&&p.isBot
+          );
+          const isBotFallback = u._botFallback;
+          if((isBot||isBotFallback)&&G.mp.mySlot===0){
+            // I'm the host → run AI and broadcast for this bot
+            setTimeout(()=>this.runAI(u),600);
+            return;
+          } else if((isBot||isBotFallback)&&G.mp.mySlot!==0){
+            // Not the host → wait for host to broadcast actions
+            this.log('⏳ Tour de '+u.name+'...','sys');
+            return;
+          } else {
+            // Human opponent → wait for their actions
+            this.log('⏳ Tour de '+u.name+'...','sys');
+            return;
+          }
         }
-        // My main unit → falls through to isHumanTurn
       }
       const delay=this.mode==='2v2'?1200:500;
       setTimeout(()=>this.runAI(u),delay);
@@ -9146,6 +9150,21 @@ G.mp = {
   // ── Envoyer une action de jeu ──────────────────────────────────
   sendAction(action) {
     this._send({ type: 'game_action', roomId: this.roomId, action });
+  },
+
+  // Helper: find which player slot owns a given unit
+  _unitOwnerSlot(u) {
+    if (!u || !G.mp._gamePlayers) return -1;
+    // Main units: id = 'player_0','enemy_1','player_1','enemy_2','enemy_3'
+    const slotMap = {'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
+    if (slotMap[u.id] !== undefined) return slotMap[u.id];
+    // Servants/clones: find owner's slot
+    const ownerId = u.servantOwner || u.cloneOwner || u.owner;
+    if (ownerId) {
+      const ownerSlot = slotMap[ownerId];
+      if (ownerSlot !== undefined) return ownerSlot;
+    }
+    return -1; // Unknown = treat as bot (host handles)
   },
 
   // ── Appliquer une action reçue du réseau ───────────────────────
