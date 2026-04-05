@@ -351,8 +351,9 @@ function startPBStep(room) {
     return;
   }
   const step = steps[room.pbStep];
-  const banned = Object.values(room.pbBans).filter(Boolean);
-  const picked = Object.values(room.pbPicks).filter(Boolean);
+  // Send as objects keyed by slot for correct client mapping
+  const banned = room.pbBans;
+  const picked = room.pbPicks;
   const curSlot = step.slot ?? (step.team === 'player' ? 0 : 1);
   // Find pseudo of player whose turn it is
   const turnPlayer = room.players.find(p => p.slot === curSlot);
@@ -390,8 +391,9 @@ function autoPickBot(room, step) {
   const steps = room.mode === '2v2' ? PB_STEPS_2V2 : PB_STEPS;
   const currentStep = steps[room.pbStep];
   if (!currentStep || currentStep.team !== step.team || currentStep.type !== step.type) return;
-  const banned = Object.values(room.pbBans).filter(Boolean);
-  const picked = Object.values(room.pbPicks).filter(Boolean);
+  // Send as objects keyed by slot for correct client mapping
+  const banned = room.pbBans;
+  const picked = room.pbPicks;
   const used   = [...banned, ...picked];
   const allHeroes = ['pyro','cryo','rogue','paladin','archer','necro','storm','shaman',
     'shadow','berserker','adventurer','smuggler','dragonmaster','runesmith','enchanter',
@@ -410,8 +412,9 @@ function applyPBChoice(room, slot, type, heroId) {
   const curStep = steps[room.pbStep];
   room.broadcastAll({ type: 'pb_choice',
     team: curStep.team, slot, stepType: type, heroId,
-    bans:  Object.values(room.pbBans),
-    picks: Object.values(room.pbPicks) });
+    bans:  room.pbBans,    // object keyed by slot: {0:'ninja', 1:'shaman', ...}
+    picks: room.pbPicks    // object keyed by slot: {0:'ninja', 1:'shaman', ...}
+  });
   room.pbStep++;
   if (room.pbTimer) { clearTimeout(room.pbTimer); room.pbTimer = null; }
   setTimeout(() => startPBStep(room), 500);
