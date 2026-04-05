@@ -189,6 +189,67 @@ function isPseudoInUse(pseudo) {
   return false;
 }
 
+// Force a match for all players currently in the queue (with bots filling empty slots)
+// Idempotent: first call wins, subsequent calls are no-ops (players already removed)
+function forceMatchWithBots(mode) {
+  const queue = queues[mode];
+  if (queue.length === 0) return; // nobody left
+
+  // Take ALL remaining players in the queue
+  const allInQueue = queue.splice(0);
+  allInQueue.forEach(p => clearTimeout(p.botTimerRef));
+  if (queues._2v2MatchTimer) { clearTimeout(queues._2v2MatchTimer); queues._2v2MatchTimer = null; }
+
+  const room = new Room(uid(), mode);
+
+  if (mode === '1v1') {
+    // Only 1 player should be here (other would have been matched already)
+    const p = allInQueue[0];
+    room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
+      team:'player', isBot:false, slot:0, _ip:p._ip||'0.0.0.0'});
+  } else {
+    // 2v2: assign slots with balance
+    const slotOrder = [0, 1, 2, 3];
+    const usedSlots = new Set();
+    // Honor preferences first
+    allInQueue.forEach(p => {
+      if (p._slotPref !== undefined && !usedSlots.has(p._slotPref)) {
+        usedSlots.add(p._slotPref);
+        p._assignedSlot = p._slotPref;
+      }
+    });
+    // Balance remaining
+    allInQueue.forEach(p => {
+      if (p._assignedSlot === undefined) {
+        const teamCounts = {player:0, enemy:0};
+        allInQueue.forEach(q => {
+          if (q._assignedSlot !== undefined) {
+            if (q._assignedSlot===0||q._assignedSlot===2) teamCounts.player++;
+            else teamCounts.enemy++;
+          }
+        });
+        const prefer = teamCounts.player > teamCounts.enemy ? 'enemy' : 'player';
+        let slot = slotOrder.find(s => !usedSlots.has(s) &&
+          ((prefer==='player'&&(s===0||s===2))||(prefer==='enemy'&&(s===1||s===3))));
+        if (slot === undefined) slot = slotOrder.find(s => !usedSlots.has(s));
+        usedSlots.add(slot);
+        p._assignedSlot = slot;
+      }
+    });
+    allInQueue.forEach(p => {
+      const slot = p._assignedSlot ?? allInQueue.indexOf(p);
+      const team = (slot===0||slot===2)?'player':'enemy';
+      room.players.push({ws:p.ws, pseudo:p.pseudo, sessionId:p.sessionId,
+        team, isBot:false, slot, _ip:p._ip||'0.0.0.0'});
+    });
+  }
+
+  room.fillWithBots();
+  rooms.set(room.id, room);
+  log(`forceMatch ${mode}: room ${room.id} — ${room.players.map(p=>p.pseudo+'['+p.slot+']').join(' ')}`);
+  startRoom(room);
+}
+
 function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
   const queue = queues[mode];
   if (!queue) return send(ws, { type: 'error', msg: 'Mode invalide' });
@@ -224,19 +285,10 @@ function joinQueue(ws, pseudo, sessionId, mode, preferredTeam='player') {
       })) });
   });
 
-  // Timer 60s → remplir avec bots
+  // Timer 60s → forcer le lancement avec bots pour TOUS les joueurs restants
   player.botTimer = setTimeout(() => {
-    const idx = queue.indexOf(player);
-    if (idx === -1) return; // déjà matché
-    queue.splice(idx, 1);
-    // Créer room avec ce joueur + bots
-    const room = new Room(uid(), mode);
-    room.players.push({ ws, pseudo, sessionId, team: 'player', isBot: false, slot: 0 });
-    room.fillWithBots();
-    rooms.set(room.id, room);
-    players.get(ws).room = room.id;
-    log(`Room ${room.id}: créée avec bots (timeout 60s)`);
-    startRoom(room);
+    if (queue.indexOf(player) === -1) return; // already matched
+    forceMatchWithBots(mode);
   }, MATCHMAKING_TIMEOUT);
 
   player.botTimerRef = player.botTimer;
@@ -255,8 +307,8 @@ function tryMatch(mode) {
     if (!queues._2v2MatchTimer) {
       queues._2v2MatchTimer = setTimeout(() => {
         queues._2v2MatchTimer = null;
-        if (queues['2v2'].length >= 2) tryMatch('2v2');
-      }, 8000); // Wait 8s for more players
+        if (queues['2v2'].length >= 2) forceMatchWithBots('2v2');
+      }, 8000); // Wait 8s for more players, then force with bots
     }
     return; // Don't match immediately with only 2 players
   }
