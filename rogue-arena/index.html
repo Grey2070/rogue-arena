@@ -885,7 +885,8 @@ canvas{image-rendering:pixelated;display:block}
   <div class="appear-hint">Choisissez le skin de votre héros</div>
   <div class="appear-timer" id="appear-timer">10</div>
   <div class="appear-row" id="appear-row"></div>
-  <button class="mbtn" onclick="G.confirmAppearance()" style="margin-top:16px">✓ CONFIRMER</button>
+  <!-- Confirm button hidden in online mode, shown only offline -->
+  <button class="mbtn" id="appear-confirm-btn" onclick="G.confirmAppearance()" style="margin-top:16px">✓ CONFIRMER</button>
 </div>
 
 <!-- ═══ GAME ════════════════════════════════════════════════ -->
@@ -3169,7 +3170,17 @@ const G={
   // ── PHASE APPARENCE (timer 10s après PB) ─────────────────────
   startAppearancePhase(){
     this.showScreen('appear');
-    const hero=HEROES.find(h=>h.id===(this.mode==='2v2'?this.pb.picksA[0]:this.pb.playerPick));
+    // Online: hide confirm button — timer forces launch for everyone
+    const confirmBtn=document.getElementById('appear-confirm-btn');
+    if(confirmBtn)confirmBtn.style.display=(G.mp&&G.mp._isOnline)?'none':'block';
+
+    // In online mode, find the hero this client picked
+    let myHeroId=null;
+    if(G.mp&&G.mp._isOnline){
+      const picks=G.mp._gamePicks||{};
+      myHeroId=picks[G.mp.mySlot]||picks[String(G.mp.mySlot)];
+    }
+    const hero=HEROES.find(h=>h.id===(myHeroId||(this.mode==='2v2'?this.pb.picksA[0]:this.pb.playerPick)));
     if(!hero){this._launchGame();return;}
     // Afficher les options de skin pour le héros pické
     const row=document.getElementById('appear-row');
@@ -3206,18 +3217,42 @@ const G={
     this._appearIv=setInterval(()=>{
       t--;
       if(timerEl)timerEl.textContent=t;
-      if(t<=0){clearInterval(this._appearIv);this._launchGame();}
+      if(t<=0){
+        clearInterval(this._appearIv);
+        if(G.mp&&G.mp._isOnline){
+          // Broadcast chosen skin to all clients
+          G.mp._send({
+            type:'skin_choice',
+            slot: G.mp.mySlot,
+            skin: this.selectedSkin,
+            roomId: G.mp.roomId
+          });
+          // Launch after small delay to receive other skins
+          setTimeout(()=>this._launchGame(), 500);
+        } else {
+          this._launchGame();
+        }
+      }
     },1000);
   },
 
   confirmAppearance(){
     if(this._appearIv){clearInterval(this._appearIv);this._appearIv=null;}
-    this._launchGame();
+    if(G.mp&&G.mp._isOnline){
+      G.mp._send({type:'skin_choice', slot:G.mp.mySlot, skin:this.selectedSkin, roomId:G.mp.roomId});
+      setTimeout(()=>this._launchGame(), 300);
+    } else {
+      this._launchGame();
+    }
   },
 
   _launchGame(){
-    // Appliquer le skin sélectionné à l'unité joueur
     this._pendingSkin=this.selectedSkin;
+    // Apply pending skins from other online players
+    if(G.mp&&G.mp._isOnline&&G.mp._pendingSkins){
+      G.mp._allPendingSkins=Object.assign({}, G.mp._pendingSkins);
+      G.mp._pendingSkins={};
+    }
     if(this.mode==='2v2')this.startGame2v2();
     else this.startGame();
   },
@@ -3941,6 +3976,21 @@ const G={
       this.units.push(u0);
     }
     this._pendingSkin=null;
+    // Apply online skins from all players by slot
+    if(G.mp&&G.mp._isOnline&&G.mp._allPendingSkins){
+      const sk=G.mp._allPendingSkins;
+      const slotUnits={'0':'player_0','1':'enemy_2','2':'player_1','3':'enemy_3',
+                       // 1v1 also:
+                       'enemy_1':'enemy_1'};
+      // Map slot→unitId for skin application
+      const s2u={'0':'player_0','1':'enemy_1','2':'player_1','3':'enemy_3'};
+      Object.entries(sk).forEach(([slot,skin])=>{
+        const uid=s2u[String(slot)];
+        const unit=this.units.find(u=>u.id===uid);
+        if(unit&&skin)unit.sprite=skin;
+      });
+      G.mp._allPendingSkins={};
+    }
     // 🔴 Équipe rouge (enemy) = bas-droite (7,7)
     const eh=HEROES.find(h=>h.id===pb.enemyPick);
     if(eh)this.units.push(this.mkUnit(eh,'enemy',1,7,7));
@@ -8967,6 +9017,12 @@ G.mp = {
         }
         break;
 
+      case 'skin_choice':
+        // Another player chose a skin — store it
+        if (!G.mp._pendingSkins) G.mp._pendingSkins = {};
+        G.mp._pendingSkins[msg.slot] = msg.skin;
+        break;
+
       case 'sync_catch_up':
         // Replay missed actions to recover from freeze
         if (msg.actions && msg.actions.length > 0) {
@@ -9450,10 +9506,11 @@ G.mp = {
       pb.enemyPick  = msg.picks['1'] || msg.picks[1] || null;
       G.mp._myUnitId = slotToUnitId[G.mp.mySlot] || 'player_0';
       // Set team/idx for mkUnit patch
-      G.mp._myUnitTeam = G.mp._myUnitId.split('_')[0]; // 'player' or 'enemy'
-      G.mp._myUnitIdx  = 0; // 1v1: always index 0 within the team
+      G.mp._myUnitTeam = G.mp._myUnitId.split('_')[0];
+      G.mp._myUnitIdx  = 0;
       G.mp._assignUnitControl_preStart('1v1');
-      G.startGame();
+      // Show appearance selection before starting
+      G.startAppearancePhase();
     } else {
       pb.picksA = [msg.picks['0']||msg.picks[0], msg.picks['2']||msg.picks[2]].filter(Boolean);
       pb.picksB = [msg.picks['1']||msg.picks[1], msg.picks['3']||msg.picks[3]].filter(Boolean);
@@ -9468,7 +9525,8 @@ G.mp = {
       // Index within the team: player_0→0, player_1→1, enemy_2→0, enemy_3→1
       G.mp._myUnitIdx  = (_uid==='player_1'||_uid==='enemy_3') ? 1 : 0;
       G.mp._assignUnitControl_preStart('2v2');
-      G.startGame2v2();
+      // Show appearance selection before starting
+      G.startAppearancePhase();
     }
   },
 
