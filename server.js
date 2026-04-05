@@ -46,11 +46,26 @@ function savePseudoData() {
 // 3. C'est son IP (même réseau, navigateur différent)
 function canUsePseudo(pseudo, sessionId, ip) {
   const key = pseudo.toLowerCase();
+
+  // Tier 1: Check ACTIVE connections only
+  // If an active player (different ws) uses this pseudo with a different sessionId → block
+  for (const [, pd] of players.entries()) {
+    if (pd.pseudo?.toLowerCase() === key) {
+      if (pd.sessionId === sessionId) return true;  // same session = same player
+      if (ip && ip !== '0.0.0.0' && pd._ip === ip) return true; // same IP
+      return false; // Actively used by someone else
+    }
+  }
+
+  // Tier 2: No active player using it — check persistent registry
   const entry = pseudoRegistry.get(key);
-  if (!entry) return true;                   // jamais utilisé
-  if (entry.sessionId === sessionId) return true; // même session
-  if (ip && ip !== '0.0.0.0' && entry.ip === ip) return true; // même IP
-  return false;
+  if (!entry) return true;
+  if (entry.sessionId === sessionId) return true;
+  if (ip && ip !== '0.0.0.0' && entry.ip === ip) return true;
+
+  // Not in active use and registry entry doesn't match → allow
+  // (player may have changed device/network; don't permanently block)
+  return true;
 }
 
 function registerPseudo(pseudo, sessionId, ip) {
@@ -365,7 +380,7 @@ function startPBStep(room) {
     stepType: step.type,
     slot: curSlot,
     pseudo: turnPseudo,
-    banned, picked,
+    bans: banned, picks: picked,
     timeLeft: 15,
     total: steps.length
   });

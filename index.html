@@ -172,7 +172,8 @@ canvas{image-rendering:pixelated;display:block}
 #sc-game{flex-direction:row;overflow:hidden;position:relative;height:100svh;height:100vh;max-height:100svh;max-height:100vh}
 
 /* Left/Right panels — PC */
-.l-panel,.r-panel{background:var(--panel);display:flex;flex-direction:column;
+.l-panel,.r-panel{background:var(--panel);display:grid;
+  grid-template-rows:auto auto 1fr auto auto;
   padding:8px 8px 0 8px;gap:5px;overflow:hidden;flex-shrink:0;position:relative;z-index:10;
   height:100svh;height:100vh;max-height:100svh;max-height:100vh;box-sizing:border-box}
 .l-panel{width:clamp(150px,16vw,200px);border-right:2px solid var(--border);
@@ -236,7 +237,7 @@ canvas{image-rendering:pixelated;display:block}
 .sk-info{border:1px solid var(--border);background:rgba(255,255,255,.02);padding:6px;
   font-size:clamp(11px,1.8vw,13px);min-height:30px;max-height:60px;overflow:hidden;
   color:var(--dim);line-height:1.4;flex-shrink:0}
-.skl{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;min-height:0}
+.skl{display:flex;flex-direction:column;gap:4px;overflow-y:auto;min-height:0;height:100%}
 .skbtn{border:2px solid var(--border);background:rgba(255,255,255,.02);padding:6px;
   cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;text-align:left;flex-shrink:0}
 .skbtn:hover:not(.skdis),.skbtn:active:not(.skdis){border-color:var(--accent);background:rgba(232,200,74,.05)}
@@ -285,7 +286,8 @@ canvas{image-rendering:pixelated;display:block}
 
 .etbtn{font-family:'Press Start 2P',monospace;font-size:clamp(7px,1.5vw,8px);
   background:transparent;border:2px solid var(--accent);color:var(--accent);
-  padding:10px 8px;cursor:pointer;transition:all .15s;margin-top:auto;flex-shrink:0}
+  padding:10px 8px;cursor:pointer;transition:all .15s;
+  align-self:end;flex-shrink:0;margin-top:4px}
 .etbtn:hover,.etbtn:active{background:var(--accent);color:var(--bg)}
 .etbtn:disabled{opacity:.35;cursor:not-allowed}
 
@@ -308,8 +310,8 @@ canvas{image-rendering:pixelated;display:block}
   /* Mobile bottom bar */
   .mob-bar{display:flex;background:var(--panel);border-top:2px solid var(--border);
     height:auto;flex-shrink:0;flex-direction:column;overflow:hidden;
-    padding-bottom:env(safe-area-inset-bottom,var(--safe-bottom));
-    max-height:55vh;/* Never take more than half screen */}
+    max-height:50svh;max-height:50vh;
+    padding-bottom:env(safe-area-inset-bottom,0px)}
 
   /* Unit strips: scrollable horizontal */
   .mob-units{display:flex;overflow-x:auto;gap:6px;padding:5px 8px;
@@ -361,8 +363,8 @@ canvas{image-rendering:pixelated;display:block}
   .mob-et{font-family:'Press Start 2P',monospace;font-size:8px;
     background:var(--panel);border:none;border-top:2px solid var(--accent);
     color:var(--accent);padding:10px;cursor:pointer;width:100%;text-align:center;
-    flex-shrink:0;position:relative;z-index:20;
-    padding-bottom:max(10px,env(safe-area-inset-bottom))}
+    flex-shrink:0;position:sticky;bottom:0;z-index:20;
+    padding-bottom:max(10px,env(safe-area-inset-bottom,0px))}
   .mob-et:active{background:var(--accent);color:var(--bg)}
   .mob-et:disabled{opacity:.35;cursor:not-allowed}
 
@@ -4889,6 +4891,26 @@ const G={
       // Empower peut cibler soi-même
       if(sk.effect==='empower'){const ds=dist(u.x,u.y,u.x,u.y);this.highlights.push({x:u.x,y:u.y,type:'ally'});}
       this.units.forEach(t=>{if(!t.alive||t.team!==u.team)return;const d=dist(u.x,u.y,t.x,t.y);if(sk.range===0||d<=sk.range)this.highlights.push({x:t.x,y:t.y,type:'ally'});});return;}
+    // Fracture : peut cibler rochers (destroy) ET unités ennemies directement (attack)
+    if(sk.effect==='fracture'){
+      // Enemy units in range
+      [...this.units,...(this.turrets||[])].forEach(t=>{
+        if(!t.alive||t.team===u.team)return;
+        const d=dist(u.x,u.y,t.x,t.y);
+        if(d>0&&d<=sk.range)this.highlights.push({x:t.x,y:t.y,type:'attack'});
+      });
+      // Rock tiles in range (already handled by destroy loop below, but add here too)
+      for(let dy=-sk.range;dy<=sk.range;dy++)for(let dx=-sk.range;dx<=sk.range;dx++){
+        const ax=u.x+dx,ay=u.y+dy;
+        if(!inGrid(ax,ay))continue;
+        if(dist(u.x,u.y,ax,ay)>sk.range)continue;
+        if(this.grid[ay][ax]===1)this.highlights.push({x:ax,y:ay,type:'destroy'});
+        // Allied servants
+        const sv=this.units.find(s=>s.isServant&&s.alive&&s.x===ax&&s.y===ay&&s.team===u.team);
+        if(sv)this.highlights.push({x:ax,y:ay,type:'destroy'});
+      }
+      return;
+    }
     if(sk.placement||sk.effect==='blink'||sk.effect==='mud_zone'){for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){const d2=dist(u.x,u.y,x,y);if(d2>0&&d2<=sk.range&&this.grid[y][x]===0&&!this.getUnitAt(x,y))this.highlights.push({x,y,type:'ally'});}return;}
     const range=sk.range>0?sk.range:99;
     const DESTRUCTIBLE=[1,2,3,5,6,7,10,11,12,13]; // tout sauf eau(8) et pont(9)
@@ -5315,7 +5337,7 @@ const G={
         this.log('⚠ Maximum de tourelles atteint! (3 max)','sys');
         caster.ap+=sk.cost;return;
       }
-      const tid='turret_'+caster.id+'_'+(Date.now()%10000);
+      const tid='tr_'+caster.id+'_'+(caster._entityCount=(caster._entityCount||0)+1);
       const turret={id:tid,x:tx,y:ty,team:caster.team,owner:caster.id,
         hp:2,maxHp:2,dmg:3,range:2,alive:true,charged:false,overcharged:false,color:caster.color,_isTurret:true};
       this.turrets.push(turret);
@@ -5872,7 +5894,7 @@ const G={
         if(this.getUnitAt(rx,ry))continue;
         this.grid[ry][rx]=0; // retire le rocher
         // Crée un serviteur
-        const sid='servant_'+Date.now()%100000+'_'+created;
+        if(!caster._entityCount)caster._entityCount=0;const sid='sv_'+caster.id+'_'+(caster._entityCount++);
         const servant={
           id:sid, name:'Serviteur', heroId:'golem_servant',
           hp:4, maxHp:4, ap:3, maxAp:3, mp:2, maxMp:2,
@@ -5893,19 +5915,44 @@ const G={
       else this.log('🧱 '+created+' Serviteur(s) animé(s)!','crit');
       return;
     }
+    // Sorts offensifs : si la case cible contient un obstacle destructible, le détruire
+    if(sk.dmg>0&&!sk.targetAlly&&inGrid(tx,ty)){
+      const obCell=this.grid[ty][tx];
+      const DESTR=[1,2,3,5,6,7,10,11,12,13];
+      if(DESTR.includes(obCell)&&!this.getUnitAt(tx,ty)){
+        this.grid[ty][tx]=0;
+        spawnParticles(tx,ty,6,{color:'#c0a060',type:'spark',vy:2,decay:0.04,size:2.5});
+        this.log('💥 Obstacle détruit!','crit');
+        // Dégâts aux unités adjacentes (si sort AoE ou sort qui peut détruire)
+        if(sk.effect==='fracture'||sk.aoe||sk.effect==='fire_bomb'||sk.effect==='ice_bomb'){
+          for(const d of [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}]){
+            const ax=tx+d.x,ay=ty+d.y;
+            const adj=this.getUnitAt(ax,ay);
+            if(adj&&adj.alive&&adj.team!==caster.team)this.doDmg(adj,Math.ceil(sk.dmg/2),sk.tags,caster);
+          }
+        }
+      }
+    }
     if(ef==='fracture'){
-      // Détruit rocher ou serviteur adjacent, zone de dégâts + 50% stun
-      const dirs4=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
       let fractured=false;
-      // Chercher rocher sur la case cible
+      // 1. Cibler une unité ennemie directement → dmg + stun
+      const directTarget=this.getUnitAt(tx,ty)||this.getTurrAt(tx,ty,caster.team);
+      if(directTarget&&directTarget.alive&&directTarget.team!==caster.team){
+        this.doDmg(directTarget,sk.dmg,sk.tags,caster);
+        if(!directTarget._isTurret&&Math.random()<0.5){this.applyFx(directTarget,'stun',1);this.log('💫 '+directTarget.name+' étourdi!','crit');}
+        spawnParticles(tx,ty,5,{color:'#c0b090',type:'spark',vy:2.5,decay:0.04,size:2});
+        this.log('💥 FRACTURE! Impact direct!','crit');
+        return;
+      }
+      // 2. Cibler un rocher → détruit + AoE 3x3
       if(inGrid(tx,ty)&&this.grid[ty][tx]===1){
         this.grid[ty][tx]=0; fractured=true;
       }
-      // Ou serviteur allié sur la case cible
+      // 3. Ou serviteur allié → détruit + AoE 3x3
       const servantTarget=this.units.find(u=>u.isServant&&u.alive&&u.x===tx&&u.y===ty&&u.team===caster.team);
       if(servantTarget){servantTarget.alive=false;servantTarget.hp=0;fractured=true;}
-      if(!fractured){this.log('Aucun rocher/serviteur à fracturer!','sys');caster.ap+=sk.cost;caster.cooldowns['fracture']=0;return;}
-      // Zone de dégâts 3x3 autour du point
+      if(!fractured){this.log('Aucun rocher/serviteur/ennemi à fracturer!','sys');caster.ap+=sk.cost;caster.cooldowns['fracture']=0;return;}
+      // AoE 3x3 autour du point détruit
       let hits=0;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
         const ax=tx+dx,ay=ty+dy;if(!inGrid(ax,ay))continue;
@@ -6020,7 +6067,7 @@ const G={
       const cx3=caster.x+Math.sign(dx2),cy3=caster.y+Math.sign(dy2);
       if(!inGrid(cx3,cy3)||this.getUnitAt(cx3,cy3)){this.log('Impossible d\'invoquer ici!','sys');caster.ap+=sk.cost;if(sk.cd)caster.cooldowns[sk.id]=0;return;}
       const clone={
-        id:'clone_'+Date.now()%10000, name:'Clone Aqueux', heroId:'ondelame_clone',
+        id:'cl_'+caster.id+'_'+(caster._entityCount=(caster._entityCount||0)+1), name:'Clone Aqueux', heroId:'ondelame_clone',
         hp:10, maxHp:10, ap:3, maxAp:3, mp:3, maxMp:3,
         x:cx3, y:cy3, team:caster.team, alive:true,
         statusEffects:[], cooldowns:{}, sprite:'ondelame', color:'#80d8ff',
@@ -6621,24 +6668,25 @@ const G={
           setTimeout(()=>this.runAI(u),400);
           return;
         } else {
-          // Not my unit — is it a bot? Only the HOST (slot 0) runs AI for bots
-          const isBot = G.mp._gamePlayers?.find(p=>
-            p.slot===(G.mp._unitOwnerSlot?.(u))&&p.isBot
-          );
-          const isBotFallback = u._botFallback;
-          if((isBot||isBotFallback)&&G.mp.mySlot===0){
-            // I'm the host → run AI and broadcast for this bot
-            setTimeout(()=>this.runAI(u),600);
-            return;
-          } else if((isBot||isBotFallback)&&G.mp.mySlot!==0){
-            // Not the host → wait for host to broadcast actions
-            this.log('⏳ Tour de '+u.name+'...','sys');
-            return;
+          // Not my unit — find who owns it
+          const unitSlotMap={'player_0':0,'enemy_1':1,'player_1':2,'enemy_2':3,'enemy_3':3};
+          // For servants/clones/turrets, owner = servantOwner/cloneOwner/owner
+          const ownerId = u.servantOwner||u.cloneOwner||u.owner||u.id;
+          const ownerSlot = unitSlotMap[ownerId]??unitSlotMap[u.id]??-1;
+          const ownerPlayer = G.mp._gamePlayers?.find(p=>p.slot===ownerSlot);
+          const isOwnedByBot = ownerPlayer?.isBot || u._botFallback || ownerSlot===-1;
+          if(isOwnedByBot){
+            if(G.mp.mySlot===0){
+              // Host runs AI for all bot-owned units
+              setTimeout(()=>this.runAI(u),600);
+            } else {
+              this.log('⏳ Tour de '+u.name+'...','sys');
+            }
           } else {
-            // Human opponent → wait for their actions
+            // Owned by a human opponent → wait for their broadcast
             this.log('⏳ Tour de '+u.name+'...','sys');
-            return;
           }
+          return;
         }
       }
       const delay=this.mode==='2v2'?1200:500;
@@ -9287,11 +9335,9 @@ G.mp = {
 
     // Sync local pb state from server
     pb.step = msg.step;
-    pb.playerBan  = msg.banned[0] || null;
-    pb.enemyBan   = msg.banned[1] || null;
-    pb.playerPick = msg.picked[0] || null;
-    pb.enemyPick  = msg.picked[1] || null;
-    pb.sel = null;
+    pb.sel  = null;
+    // Use bans/picks (objects keyed by slot) via _syncPBState
+    G.mp._syncPBState(pb, msg.bans || msg.banned, msg.picks || msg.picked);
 
     // Is it MY turn? — determined by slot number, not team name
     const isMyTurn = (msg.slot === G.mp.mySlot);
