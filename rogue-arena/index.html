@@ -9152,6 +9152,17 @@ G.mp = {
     this._send({ type: 'game_action', roomId: this.roomId, action });
   },
 
+  // Seeded RNG — deterministic random for both clients
+  _mulberry32(seed) {
+    let s = seed >>> 0;
+    return function() {
+      s += 0x6D2B79F5; let t = s;
+      t = Math.imul(t ^ t>>>15, t|1);
+      t ^= t + Math.imul(t ^ t>>>7, t|61);
+      return ((t ^ t>>>14)>>>0) / 4294967296;
+    };
+  },
+
   // Sync pb state from server's slot-keyed objects
   _syncPBState(pb, bans, picks) {
     if (!pb) return;
@@ -9209,10 +9220,14 @@ G.mp = {
         const sk = u?.skills?.find(s => s.id === action.skillId);
         if (u && sk) {
           const orig = G.castSkill.__original || G.castSkill;
-          orig.call(G, u, sk, action.tx, action.ty);
-          // After skill applied, rebuild turnOrder (may have added servants/turrets)
-          // Don't rebuild full turnOrder mid-game (would reset turnIdx)
-          // Servants/turrets are spliced in at correct position by the skill handlers
+          if (action.seed !== undefined && G.mp && G.mp._mulberry32) {
+            const _prev = Math.random;
+            Math.random = G.mp._mulberry32(action.seed);
+            orig.call(G, u, sk, action.tx, action.ty);
+            Math.random = _prev;
+          } else {
+            orig.call(G, u, sk, action.tx, action.ty);
+          }
         }
         break;
       }
@@ -9597,17 +9612,20 @@ G.mp = {
         (caster?.servantOwner===G.mp._myUnitId||caster?.cloneOwner===G.mp._myUnitId);
       const isMyTurret = caster?._isTurret && caster?.owner===G.mp._myUnitId;
       if (isMyUnit || isMyServant || isMyTurret) {
-        const seed = (Math.random() * 0xFFFFFFFF) >>> 0; // pre-generate seed
-        _installSeed(seed); // use same seed locally
+        // Generate seed for deterministic random outcomes
+        const seed = (Math._origRandom||Math.random)() * 0xFFFFFFFF >>> 0;
+        G.mp._activeSeed = seed;
+        G.mp._rngFn = G.mp._mulberry32(seed);
+        const _prev = Math.random;
+        Math.random = G.mp._rngFn;
         G.mp.sendAction({ type: 'skill', unitId: caster.id, skillId: sk.id, tx, ty, seed });
         _origCastSkill(caster, sk, tx, ty);
-        _removeSeed();
+        Math.random = _prev;
+        G.mp._activeSeed = null;
         return;
       }
     }
     _origCastSkill(caster, sk, tx, ty);
-    // Don't rebuild full turnOrder (would reset position)
-    // New entities are inserted via splice in their respective cast handlers
   };
   G.castSkill.__original = _origCastSkill;
 })();
